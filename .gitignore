@@ -1,0 +1,17 @@
+### Python ###
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Created by IDE
+.vscode/
+
+# Custom rules
+history.json

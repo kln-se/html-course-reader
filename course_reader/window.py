@@ -1,15 +1,16 @@
 """Интерфейс чтения, выбора курсов и работы с заметками."""
 from pathlib import Path
+import subprocess
 from shiboken6 import delete
-from PySide6.QtCore import Qt, QUrl, QTimer, QSize, Slot
+from PySide6.QtCore import Qt, QUrl, QTimer, QSize, Slot, QFileSystemWatcher
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListWidget,
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
     QPushButton, QInputDialog, QDockWidget, QWidget, QLineEdit, QCheckBox, QComboBox,
-    QDialogButtonBox, QFormLayout, QLabel)
+    QDialogButtonBox, QFormLayout, QLabel, QMenu)
 from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from .catalog import scan, PAGE_SUFFIXES, adjacent
+from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments
 from .viewer import Page, OfflineInterceptor
 from .storage import Store
 from .theme import EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
@@ -31,6 +32,7 @@ class Window(QMainWindow):
         self.closing = False
         self.files = []
         self.items = {}
+        self.directory_items = {}
         self.setWindowTitle('Course Reader')
         self.resize(1200, 800)
         self.setMinimumSize(760, 520)
@@ -41,6 +43,17 @@ class Window(QMainWindow):
         self.tree.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.tree.setAccessibleName('Файлы курса')
         self.tree.itemClicked.connect(self.tree_clicked)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self.tree_context_menu)
+        self.catalog_watcher = QFileSystemWatcher(self)
+        self.catalog_watcher.directoryChanged.connect(self.schedule_catalog_refresh)
+        self.catalog_timer = QTimer(self)
+        self.catalog_timer.setSingleShot(True)
+        self.catalog_timer.setInterval(250)
+        self.catalog_timer.timeout.connect(self.refresh_catalog)
+        self.catalog_fallback = QTimer(self)
+        self.catalog_fallback.setInterval(3000)
+        self.catalog_fallback.timeout.connect(self.refresh_catalog)
         self.favorites = QListWidget()
         self.favorites.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.favorites.setAccessibleName('Избранные страницы курса')
@@ -239,6 +252,8 @@ class Window(QMainWindow):
     def set_course(self, root):
         """Сменить корень курса, перестроить дерево и открыть существующий последний файл."""
         self.persist()
+        self.catalog_timer.stop()
+        self.catalog_fallback.stop()
         self.current = None
         self.root = root.resolve()
         self.view.setUrl(QUrl('about:blank'))
@@ -251,32 +266,117 @@ class Window(QMainWindow):
             self.refresh_metadata()
             self.statusBar().showMessage(str(self.root))
 
-    def rebuild(self):
-        """Пересканировать курс по маскам и построить дерево только для найденных файлов."""
-        self.tree.clear()
-        self.items = {}
-        if not self.root:
+    def rebuild(self, files=None):
+        """Перестроить дерево, сохранив раскрытие папок, выделение и прокрутку дерева.
+
+        Саму страницу и панель заметок не перезагружать. Если список файлов
+        уже получен наблюдателем, повторный обход не выполнять.
+        """
+        selected = self.tree.currentItem()
+        selected_path = selected.data(0, Qt.ItemDataRole.UserRole) if selected else None
+        expanded = {path for path, item in self.directory_items.items() if item.isExpanded()}
+        vertical = self.tree.verticalScrollBar().value()
+        horizontal = self.tree.horizontalScrollBar().value()
+        self.tree.setUpdatesEnabled(False)
+        try:
+            self.tree.clear()
+            self.items = {}
+            self.directory_items = {}
+            if not self.root:
+                self.files = []
+                return
+            if files is None:
+                directories = []
+                files = scan(self.root, self.store.patterns, directories=directories)
+                self.sync_catalog_watches(directories)
+            self.files = files
+            folders = {'.': self.tree.invisibleRootItem()}
+            for path in self.files:
+                relative = path.relative_to(self.root)
+                parent = folders['.']
+                for index, name in enumerate(relative.parts[:-1]):
+                    key = '/'.join(relative.parts[:index + 1])
+                    if key not in folders:
+                        folder = self.root.joinpath(*relative.parts[:index + 1])
+                        node = QTreeWidgetItem(parent, [name])
+                        node.setData(0, Qt.ItemDataRole.UserRole, str(folder))
+                        node.setToolTip(0, key)
+                        folders[key] = node
+                        self.directory_items[str(folder)] = node
+                    parent = folders[key]
+                item = QTreeWidgetItem(parent, [path.name])
+                item.setData(0, Qt.ItemDataRole.UserRole, str(path))
+                item.setToolTip(0, relative.as_posix())
+                self.items[str(path)] = item
+            target = self.items.get(selected_path) or self.directory_items.get(selected_path)
+            if target is None and self.current:
+                target = self.items.get(str(self.current))
+            if target is not None:
+                self.tree.setCurrentItem(target)
+            for path, item in self.directory_items.items():
+                item.setExpanded(path in expanded)
+            self.tree.verticalScrollBar().setValue(vertical)
+            self.tree.horizontalScrollBar().setValue(horizontal)
+        finally:
+            self.tree.setUpdatesEnabled(True)
+
+    def sync_catalog_watches(self, directories: list[Path]) -> None:
+        """Обновить наблюдение, включая пустые папки; при отказах включить резервный опрос."""
+        desired = {str(path) for path in directories}
+        watched = set(self.catalog_watcher.directories())
+        obsolete = sorted(watched - desired)
+        if obsolete:
+            self.catalog_watcher.removePaths(obsolete)
+        missing = sorted(desired - watched)
+        failed = self.catalog_watcher.addPaths(missing) if missing else []
+        if failed or (self.root is not None and not self.root.is_dir()):
+            self.catalog_fallback.start()
+        else:
+            self.catalog_fallback.stop()
+
+    def schedule_catalog_refresh(self, changed_path: str) -> None:
+        """Объединить близкие файловые события без бесконечного откладывания при копировании."""
+        if not self.closing and self.root and not self.catalog_timer.isActive():
+            self.catalog_timer.start()
+
+    def refresh_catalog(self) -> None:
+        """Обновить файлы и наблюдателей, не меняя открытый материал и заметки."""
+        if self.closing or not self.root:
             return
-        self.files = scan(self.root, self.store.patterns)
-        folders = {'.': self.tree.invisibleRootItem()}
-        for path in self.files:
-            relative = path.relative_to(self.root)
-            parent = folders['.']
-            for index, name in enumerate(relative.parts[:-1]):
-                key = '/'.join(relative.parts[:index + 1])
-                if key not in folders:
-                    folders[key] = QTreeWidgetItem(parent, [name])
-                parent = folders[key]
-            item = QTreeWidgetItem(parent, [path.name])
-            item.setData(0, Qt.ItemDataRole.UserRole, str(path))
-            item.setToolTip(0, relative.as_posix())
-            self.items[str(path)] = item
-        self.refresh_metadata()
+        directories = []
+        files = scan(self.root, self.store.patterns, directories=directories)
+        self.sync_catalog_watches(directories)
+        if files != self.files:
+            self.rebuild(files)
+
+    def tree_context_menu(self, position) -> None:
+        """Показать действие для элемента под указателем без открытия страницы."""
+        item = self.tree.itemAt(position)
+        if item is None:
+            return
+        value = item.data(0, Qt.ItemDataRole.UserRole)
+        if not value:
+            return
+        path = Path(value)
+        menu = QMenu(self)
+        show = menu.addAction('Показать в проводнике')
+        chosen = menu.exec(self.tree.viewport().mapToGlobal(position))
+        if chosen == show:
+            self.show_in_explorer(path)
+
+    def show_in_explorer(self, path: Path) -> None:
+        """Открыть Проводник для объекта курса; сообщить об исчезновении файла или ошибке запуска."""
+        if not self.root or not path.resolve().is_relative_to(self.root):
+            return
+        try:
+            subprocess.Popen(explorer_arguments(path), shell=False)
+        except OSError as error:
+            QMessageBox.warning(self, 'Проводник', str(error))
 
     def tree_clicked(self, item, column):
         """Открыть файл выбранного элемента; щелчок по папке не загружает страницу."""
         path = item.data(0, Qt.ItemDataRole.UserRole)
-        if path:
+        if path and str(path) in self.items:
             self.open_file(Path(path))
 
     def open_file(self, path):
@@ -521,6 +621,9 @@ class Window(QMainWindow):
         self.navigation_generation += 1
         self.loading = True
         self.save_timer.stop()
+        self.catalog_timer.stop()
+        self.catalog_fallback.stop()
+        self.catalog_watcher.blockSignals(True)
         self.persist()
         self.view.stop()
         delete(self.view)

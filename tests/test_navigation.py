@@ -310,6 +310,9 @@ def lifecycle(reader, monkeypatch):
     """Записать внешние операции закрытия вместо уничтожения реальных Qt-объектов."""
     calls = []
     reader.save_timer.stop = lambda: calls.append('timer.stop')
+    reader.catalog_timer = SimpleNamespace(stop=lambda: calls.append('catalog.stop'))
+    reader.catalog_fallback = SimpleNamespace(stop=lambda: calls.append('fallback.stop'))
+    reader.catalog_watcher = SimpleNamespace(blockSignals=lambda value: calls.append(('watcher.block', value)))
     reader.persist = lambda: calls.append('persist')
     reader.view.stop = lambda: calls.append('view.stop')
     reader.profile = object()
@@ -332,12 +335,12 @@ def test_close_destroys_view_before_profile_and_is_idempotent(reader, lifecycle)
     event, calls = lifecycle
     generation = reader.navigation_generation
     Window.closeEvent(reader, event)
-    assert calls == ['timer.stop', 'persist', 'view.stop', 'delete.view', 'delete.profile', 'accept']
+    assert calls == ['timer.stop', 'catalog.stop', 'fallback.stop', ('watcher.block', True), 'persist', 'view.stop', 'delete.view', 'delete.profile', 'accept']
     assert reader.closing is True
     assert reader.loading is True
     assert reader.navigation_generation == generation + 1
     Window.closeEvent(reader, event)
-    assert calls == ['timer.stop', 'persist', 'view.stop', 'delete.view', 'delete.profile', 'accept', 'accept']
+    assert calls == ['timer.stop', 'catalog.stop', 'fallback.stop', ('watcher.block', True), 'persist', 'view.stop', 'delete.view', 'delete.profile', 'accept', 'accept']
     assert reader.navigation_generation == generation + 1
 
 

@@ -19,14 +19,17 @@ def matches(path: Path, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatchcase(path.name.casefold(), p.casefold()) for p in patterns)
 
 
-def scan(root: Path, patterns: list[str]) -> list[Path]:
+def scan(root: Path, patterns: list[str], *, directories: list[Path] | None = None) -> list[Path]:
     """Собрать подходящие файлы рекурсивным обходом в естественном порядке.
 
     Символические ссылки и недоступные для перечисления папки пропускаются.
-    Возвращаемые пути сохраняют форму заданного root; пустые папки не входят в результат."""
+    Возвращаемые пути сохраняют форму заданного root; пустые папки не входят в результат.
+    Если передан directories, добавить туда все посещённые папки для наблюдения."""
     result = []
     def visit(directory: Path) -> None:
         """Добавить файлы доступной папки и её подкаталогов в общий результат обхода."""
+        if directories is not None and directory.is_dir():
+            directories.append(directory)
         try:
             children = sorted(directory.iterdir(), key=lambda p: natural_key(p.name))
         except OSError:
@@ -65,3 +68,15 @@ def link_kind(address: str) -> str:
     if scheme in ('', 'file'):
         return 'local'
     return 'blocked'
+
+
+def explorer_arguments(path: Path) -> list[str]:
+    """Построить аргументы Проводника для выделения файла или папки в родительской директории.
+
+    Пути передаются отдельными аргументами без shell. Для отсутствующего
+    объекта вызвать FileNotFoundError; не запускать внешние процессы здесь.
+    """
+    path = path.resolve()
+    if path.is_dir() or path.is_file():
+        return ['explorer.exe', '/select,', str(path)]
+    raise FileNotFoundError(str(path))

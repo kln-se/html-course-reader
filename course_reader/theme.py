@@ -109,6 +109,11 @@ def stylesheet(theme: str) -> str:
     QWidget {{ color: {c['text']}; }}
     QMainWindow, QDialog, QDockWidget, QWidget#sidebar {{ background: {c['bg']}; }}
     QToolTip {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 6px; }}
+    QMenu {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 4px; }}
+    QMenu::item {{ background: transparent; color: {c['text']}; padding: 8px 24px; border-radius: 4px; }}
+    QMenu::item:selected {{ background: {c['selected']}; color: {c['text']}; }}
+    QMenu::item:disabled {{ color: {c['muted']}; }}
+    QMenu::separator {{ height: 1px; background: {c['border']}; margin: 4px 8px; }}
     QLabel#brand {{ font-size: 17pt; font-weight: 600; }}
     QLabel#caption, QLabel#emptyHint {{ color: {c['muted']}; }}
     QLabel#emptyHint {{ background: transparent; }}
