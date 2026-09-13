@@ -1,0 +1,30 @@
+MIME-Version: 1.0
+Subject: Course Reader MHTML fixture
+Content-Type: multipart/related; type="text/html";
+ boundary="===============2123989324943926361=="
+
+--===============2123989324943926361==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+Content-Location: https://course.invalid/archive.html
+
+<!doctype html><html><head><meta charset=3Dutf-8><title>MHTML fixture</title>=
+<style>body{font:20px sans-serif;padding:40px;background:white;color:#253246}=
+h1{color:#164f75}</style></head><body><h1>MHTML archive OK</h1><p>This text a=
+nd the image are embedded in the archive.</p><img src=3Dhttps://course.invali=
+d/picture.svg alt=3DEmbedded-image><details><summary>Expand details</summary>=
+<p>Local archive content.</p></details></body></html>
+
+--===============2123989324943926361==
+Content-Type: image/svg+xml
+Content-Transfer-Encoding: base64
+MIME-Version: 1.0
+Content-Location: https://course.invalid/picture.svg
+
+PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMjAiIGhlaWdo
+dD0iMTAwIj48cmVjdCB3aWR0aD0iMzIwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iIzI3NWU4MyIvPjx0
+ZXh0IHg9IjMwIiB5PSI2MCIgZmlsbD0id2hpdGUiIGZvbnQtc2l6ZT0iMjQiPk1IVE1MIGltYWdl
+IE9LPC90ZXh0Pjwvc3ZnPg==
+
+--===============2123989324943926361==--
