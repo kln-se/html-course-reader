@@ -1,7 +1,7 @@
 """Интерфейс чтения, выбора курсов и работы с заметками."""
 from pathlib import Path
 from shiboken6 import delete
-from PySide6.QtCore import Qt, QUrl, QTimer
+from PySide6.QtCore import Qt, QUrl, QTimer, QSize, Slot
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListWidget,
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
@@ -12,6 +12,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent
 from .viewer import Page, OfflineInterceptor
 from .storage import Store
+from .theme import EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
 
 
 class Window(QMainWindow):
@@ -19,6 +20,8 @@ class Window(QMainWindow):
     def __init__(self, store: Store):
         """Создать панели, обработчики и профиль WebEngine, применить настройки переданного Store."""
         super().__init__()
+        self.setFont(interface_font())
+        self.icon_actions = []
         self.store = store
         self.root = None
         self.current = None
@@ -30,14 +33,36 @@ class Window(QMainWindow):
         self.items = {}
         self.setWindowTitle('Course Reader')
         self.resize(1200, 800)
+        self.setMinimumSize(760, 520)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
+        self.tree.setIndentation(18)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.tree.setAccessibleName('Файлы курса')
         self.tree.itemClicked.connect(self.tree_clicked)
         self.favorites = QListWidget()
+        self.favorites.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.favorites.setAccessibleName('Избранные страницы курса')
         self.favorites.itemClicked.connect(lambda item: self.open_file(self.root / item.data(Qt.ItemDataRole.UserRole)))
         tabs = QTabWidget()
         tabs.addTab(self.tree, 'Файлы')
         tabs.addTab(self.favorites, 'Избранное')
+        sidebar = QWidget()
+        sidebar.setObjectName('sidebar')
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setSpacing(0)
+        heading = QLabel('Course Reader')
+        heading.setObjectName('brand')
+        heading.setContentsMargins(16, 18, 16, 4)
+        caption = QLabel('Локальная библиотека курсов')
+        caption.setObjectName('caption')
+        caption.setContentsMargins(16, 0, 16, 18)
+        sidebar_layout.addWidget(heading)
+        sidebar_layout.addWidget(caption)
+        sidebar_layout.addWidget(tabs)
+        sidebar.setMinimumWidth(220)
         self.view = QWebEngineView()
         self.profile = QWebEngineProfile(self)
         self.interceptor = OfflineInterceptor(self.profile)
@@ -52,22 +77,38 @@ class Window(QMainWindow):
         self.page.loadingChanged.connect(self.report_loading)
         self.page.scrollPositionChanged.connect(self.scroll_changed)
         splitter = QSplitter()
-        splitter.addWidget(tabs)
+        splitter.addWidget(sidebar)
         splitter.addWidget(self.view)
         splitter.setSizes([280, 920])
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(4)
+        splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
         toolbar = QToolBar('Чтение')
         toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.addToolBar(toolbar)
-        self.action(toolbar, 'Курсы', self.choose_course)
-        self.action(toolbar, '← Назад', lambda: self.move(-1))
-        self.action(toolbar, 'Вперёд →', lambda: self.move(1))
-        self.favorite_action = self.action(toolbar, '☆ Избранное', self.toggle_favorite)
-        self.notes_action = self.action(toolbar, 'Заметки (0)', self.show_notes)
-        self.action(toolbar, 'Найти', self.show_find, 'Ctrl+F')
-        self.action(toolbar, '−', lambda: self.zoom(-0.1), 'Ctrl+-')
-        self.action(toolbar, '+', lambda: self.zoom(0.1), 'Ctrl+=')
-        self.action(toolbar, 'Настройки', self.settings_dialog)
+        self.action(toolbar, 'Курсы', self.choose_course, icon_name='courses')
+        toolbar.addSeparator()
+        self.action(toolbar, 'Назад', lambda: self.move(-1), icon_name='back')
+        self.action(toolbar, 'Вперёд', lambda: self.move(1), icon_name='next')
+        toolbar.addSeparator()
+        self.favorite_action = self.action(toolbar, 'Избранное', self.toggle_favorite, icon_name='bookmark')
+        self.favorite_action.setCheckable(True)
+        self.favorite_action.setEnabled(False)
+        self.notes_action = self.action(toolbar, 'Заметки (0)', self.show_notes, icon_name='notes')
+        toolbar.addSeparator()
+        self.action(toolbar, 'Найти', self.show_find, 'Ctrl+F', icon_name='search')
+        self.action(toolbar, 'Уменьшить масштаб', lambda: self.zoom(-0.1), 'Ctrl+-', icon_name='minus', icon_only=True)
+        self.zoom_label = QLabel('100%')
+        self.zoom_label.setObjectName('caption')
+        self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.zoom_label.setMinimumWidth(48)
+        toolbar.addWidget(self.zoom_label)
+        self.action(toolbar, 'Увеличить масштаб', lambda: self.zoom(0.1), 'Ctrl+=', icon_name='plus', icon_only=True)
+        toolbar.addSeparator()
+        self.action(toolbar, 'Настройки', self.settings_dialog, icon_name='settings', icon_only=True)
         self.find_bar = QToolBar('Поиск')
         self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.find_bar)
         self.find_input = QLineEdit()
@@ -75,18 +116,25 @@ class Window(QMainWindow):
         self.find_bar.addWidget(self.find_input)
         self.find_input.textChanged.connect(self.view.findText)
         self.find_input.returnPressed.connect(lambda: self.view.findText(self.find_input.text()))
-        self.action(self.find_bar, 'Закрыть', self.hide_find)
+        self.find_bar.setIconSize(QSize(20, 20))
+        self.action(self.find_bar, 'Закрыть поиск', self.hide_find, icon_name='close', icon_only=True)
         self.find_bar.hide()
         self.notes_dock = QDockWidget('Заметки к странице', self)
         panel = QWidget()
+        panel.setObjectName('sidebar')
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
         self.notes_list = QListWidget()
+        self.notes_list.setWordWrap(True)
+        self.notes_list.setAccessibleName('Заметки текущей страницы')
         layout.addWidget(self.notes_list)
         for label, callback in [('Добавить', self.add_note), ('Изменить', self.edit_note), ('Удалить', self.delete_note)]:
             button = QPushButton(label)
             button.clicked.connect(callback)
             layout.addWidget(button)
         self.notes_dock.setWidget(panel)
+        self.notes_dock.setMinimumWidth(240)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.notes_dock)
         self.notes_dock.hide()
         try:
@@ -94,18 +142,40 @@ class Window(QMainWindow):
         except ValueError:
             zoom = 1.0
         self.view.setZoomFactor(max(0.25, min(3.0, zoom)))
+        self.zoom_label.setText(f'{self.view.zoomFactor():.0%}')
+        self.hints = [
+            EmptyHint(self.tree, 'Выберите курс кнопкой «Курсы». Если файлы скрыты, проверьте маски в настройках.'),
+            EmptyHint(self.favorites, 'Важные страницы будут здесь. Нажмите «Избранное» при чтении.'),
+            EmptyHint(self.notes_list, 'Заметок пока нет. Добавьте первую заметку к открытой странице.'),
+        ]
+        for listing in (self.tree, self.favorites, self.notes_list):
+            listing.setItemDelegate(RowDelegate(listing))
+            listing.setMouseTracking(True)
+        self.status_bar = self.statusBar()
+        self.status_bar.setFont(interface_font(monospace=True))
+        self.status_bar.messageChanged.connect(self.update_status_tooltip)
         self.apply_theme()
         self.save_timer = QTimer(self)
         self.save_timer.setSingleShot(True)
         self.save_timer.timeout.connect(self.persist)
 
-    def action(self, toolbar, text, callback, shortcut=None):
+    @Slot(str)
+    def update_status_tooltip(self, message: str) -> None:
+        """Обновить полный путь в подсказке строки состояния через зарегистрированный слот Qt."""
+        self.status_bar.setToolTip(message)
+
+    def action(self, toolbar, text, callback, shortcut=None, *, icon_name=None, icon_only=False):
         """Создать действие панели с обработчиком и необязательным сочетанием клавиш; вернуть QAction."""
         action = QAction(text, self)
         action.triggered.connect(callback)
         if shortcut:
             action.setShortcut(QKeySequence(shortcut))
+        action.setToolTip(text + (f' ({shortcut})' if shortcut else ''))
+        if icon_name:
+            self.icon_actions.append((action, icon_name))
         toolbar.addAction(action)
+        if icon_only:
+            toolbar.widgetForAction(action).setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         return action
 
     def persist(self):
@@ -121,7 +191,11 @@ class Window(QMainWindow):
         dialog.setWindowTitle('Выберите курс')
         dialog.resize(600, 350)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
         listing = QListWidget()
+        listing.setFont(interface_font(monospace=True))
+        listing.setItemDelegate(RowDelegate(listing))
         listing.addItems(list(self.store.data['courses']))
         layout.addWidget(listing)
         def select():
@@ -195,6 +269,7 @@ class Window(QMainWindow):
                 parent = folders[key]
             item = QTreeWidgetItem(parent, [path.name])
             item.setData(0, Qt.ItemDataRole.UserRole, str(path))
+            item.setToolTip(0, relative.as_posix())
             self.items[str(path)] = item
         self.refresh_metadata()
 
@@ -310,7 +385,8 @@ class Window(QMainWindow):
         """Обновить избранное, заметки, строку пути и выделение текущего файла в дереве."""
         self.favorites.clear()
         self.notes_list.clear()
-        self.favorite_action.setText('☆ Избранное')
+        self.favorite_action.setChecked(False)
+        self.favorite_action.setEnabled(self.current is not None)
         self.notes_action.setText('Заметки (0)')
         if not self.root:
             return
@@ -318,6 +394,7 @@ class Window(QMainWindow):
         for relative in state['favorites']:
             self.favorites.addItem(relative)
             self.favorites.item(self.favorites.count() - 1).setData(Qt.ItemDataRole.UserRole, relative)
+            self.favorites.item(self.favorites.count() - 1).setToolTip(relative)
         if not self.current:
             return
         relative = self.current.relative_to(self.root).as_posix()
@@ -326,7 +403,7 @@ class Window(QMainWindow):
         if item:
             self.tree.setCurrentItem(item)
             self.tree.scrollToItem(item)
-        self.favorite_action.setText('★ Избранное' if relative in state['favorites'] else '☆ Избранное')
+        self.favorite_action.setChecked(relative in state['favorites'])
         notes = state['notes'].get(relative, [])
         self.notes_action.setText(f'Заметки ({len(notes)})')
         for note in notes:
@@ -392,6 +469,7 @@ class Window(QMainWindow):
         """Изменить масштаб страницы на delta в пределах 0.25–3.0 и сохранить значение."""
         factor = round(max(0.25, min(3.0, self.view.zoomFactor() + delta)), 2)
         self.view.setZoomFactor(factor)
+        self.zoom_label.setText(f'{factor:.0%}')
         self.store.settings['app']['zoom'] = str(factor)
         self.persist()
 
@@ -399,7 +477,10 @@ class Window(QMainWindow):
         """Показать настройки; после подтверждения сохранить маски, интернет-переходы и тему."""
         dialog = QDialog(self)
         dialog.setWindowTitle('Настройки')
+        dialog.setMinimumWidth(520)
         layout = QFormLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
         patterns = QLineEdit(self.store.settings['app']['visible_patterns'])
         internet = QCheckBox('Разрешать после подтверждения')
         internet.setChecked(self.store.settings.getboolean('app', 'internet_links', fallback=False))
@@ -423,9 +504,13 @@ class Window(QMainWindow):
 
     def apply_theme(self):
         """Применить светлую или графитовую палитру к виджетам, не меняя HTML страницы."""
-        dark = self.store.settings['app']['theme'] == 'dark'
-        background, panel, foreground, border, accent = ('#20242B', '#282D36', '#E6E9EF', '#3B4350', '#8AB4F8') if dark else ('#F3F4F6', '#FFFFFF', '#20242B', '#CCD2DB', '#2463AD')
-        self.setStyleSheet(f'QWidget {{ background: {background}; color: {foreground}; }} QTreeWidget, QListWidget, QLineEdit, QTextEdit {{ background: {panel}; border: 1px solid {border}; }} QPushButton, QToolButton {{ padding: 7px; border: 1px solid {border}; border-radius: 4px; }} QPushButton:hover, QToolButton:hover {{ background: {border}; }} QTreeWidget::item:selected, QListWidget::item:selected {{ background: {accent}; color: #15202B; }} QToolBar {{ spacing: 5px; padding: 4px; }}')
+        name = self.store.settings['app']['theme']
+        self.setStyleSheet(stylesheet(name))
+        for action, icon_name in self.icon_actions:
+            action.setIcon(icon(icon_name, name))
+        for listing in (self.tree, self.favorites, self.notes_list):
+            listing.setProperty('focusColor', PALETTES[name]['accent'])
+            listing.viewport().update()
 
     def closeEvent(self, event):
         """Сохранить данные и уничтожить просмотрщик со страницей раньше профиля."""

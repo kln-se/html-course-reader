@@ -1,0 +1,145 @@
+"""Единая типографика, палитры и векторные пиктограммы интерфейса читалки."""
+from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
+from PySide6.QtWidgets import QLabel, QStyle, QStyledItemDelegate
+
+PALETTES = {
+    'dark': dict(bg='#20242B', panel='#282D36', text='#E6E9EF', muted='#AFB9C9',
+                 border='#424B59', hover='#343C49', selected='#354D68', accent='#8AB4F8'),
+    'light': dict(bg='#F3F5F8', panel='#FFFFFF', text='#243246', muted='#56657A',
+                  border='#CED5DF', hover='#E7EDF5', selected='#DCEAFE', accent='#245FAB'),
+}
+
+PATHS = {
+    'courses': '<path d="M4 5h6l2 2h8v12H4z"/>',
+    'back': '<path d="m14 5-7 7 7 7"/>',
+    'next': '<path d="m10 5 7 7-7 7"/>',
+    'bookmark': '<path d="M6 4h12v17l-6-4-6 4z"/>',
+    'notes': '<path d="M5 4h14v13l-4 4H5zM8 8h8M8 12h8M8 16h4"/>',
+    'search': '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
+    'minus': '<path d="M5 12h14"/>',
+    'plus': '<path d="M5 12h14M12 5v14"/>',
+    'settings': '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/>',
+    'close': '<path d="m6 6 12 12M18 6 6 18"/>',
+}
+
+
+def interface_font(monospace: bool = False) -> QFont:
+    """Выбрать установленную гарнитуру с запасными вариантами без загрузки шрифтов."""
+    candidates = ('Cascadia Mono', 'Consolas') if monospace else ('Segoe UI Variable Text', 'Segoe UI')
+    installed = set(QFontDatabase.families())
+    fallback = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont if monospace else QFontDatabase.SystemFont.GeneralFont)
+    font = QFont(next((name for name in candidates if name in installed), fallback.family()))
+    font.setPointSizeF(9.5 if monospace else 10.5)
+    return font
+
+
+def icon(name: str, theme: str) -> QIcon:
+    """Нарисовать пиктограмму в нескольких разрешениях для обычного, выбранного и недоступного состояния."""
+    colors = PALETTES.get(theme, PALETTES['dark'])
+    result = QIcon()
+    for mode in (QIcon.Mode.Normal, QIcon.Mode.Disabled):
+        for state in (QIcon.State.Off, QIcon.State.On):
+            color = colors['muted'] if mode == QIcon.Mode.Disabled else colors['accent'] if state == QIcon.State.On else colors['text']
+            fill = color if name == 'bookmark' and state == QIcon.State.On else 'none'
+            svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="{fill}" stroke="{color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">{PATHS[name]}</svg>'
+            renderer = QSvgRenderer(QByteArray(svg.encode()))
+            for scale in (1, 2, 3):
+                pixmap = QPixmap(20 * scale, 20 * scale)
+                pixmap.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(pixmap)
+                renderer.render(painter)
+                painter.end()
+                pixmap.setDevicePixelRatio(scale)
+                result.addPixmap(pixmap, mode, state)
+    return result
+
+
+class RowDelegate(QStyledItemDelegate):
+    """Рисовать строки без системной рамки, сохраняя отдельный индикатор фокуса."""
+    def paint(self, painter, option, index):
+        """Заменить рамку фокуса тонкой полосой у края выбранной строки."""
+        focused = bool(option.state & QStyle.StateFlag.State_HasFocus)
+        option.state &= ~QStyle.StateFlag.State_HasFocus
+        super().paint(painter, option, index)
+        if focused:
+            painter.save()
+            painter.fillRect(QRect(option.rect.left(), option.rect.top() + 5, 3, option.rect.height() - 10),
+                             QColor(self.parent().property('focusColor') or '#8AB4F8'))
+            painter.restore()
+
+    def sizeHint(self, option, index):
+        """Сохранить ширину содержимого и обеспечить удобную высоту строки."""
+        size = super().sizeHint(option, index)
+        return QSize(size.width(), max(size.height(), 32))
+
+
+class EmptyHint(QLabel):
+    """Показывать пояснение над пустым списком, не создавая фиктивных элементов."""
+    def __init__(self, view, text: str):
+        """Связать подсказку с размером области просмотра и изменениями модели."""
+        super().__init__(text, view.viewport())
+        self.setObjectName('emptyHint')
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setWordWrap(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.view = view
+        view.viewport().installEventFilter(self)
+        for signal in (view.model().rowsInserted, view.model().rowsRemoved, view.model().modelReset):
+            signal.connect(self.update_hint)
+        self.update_hint()
+
+    def update_hint(self, *args):
+        """Согласовать положение и видимость подсказки с текущим содержимым."""
+        self.setGeometry(self.view.viewport().rect().adjusted(20, 12, -20, -12))
+        self.setVisible(self.view.model().rowCount() == 0)
+
+    def eventFilter(self, watched, event):
+        """Обновить геометрию при изменении размера области просмотра."""
+        if event.type() == QEvent.Type.Resize:
+            self.update_hint()
+        return super().eventFilter(watched, event)
+
+
+def stylesheet(theme: str) -> str:
+    """Вернуть общие правила размеров, состояний и цветов для выбранной темы."""
+    c = PALETTES.get(theme, PALETTES['dark'])
+    return f'''
+    QWidget {{ color: {c['text']}; }}
+    QMainWindow, QDialog, QDockWidget, QWidget#sidebar {{ background: {c['bg']}; }}
+    QToolTip {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 6px; }}
+    QLabel#brand {{ font-size: 17pt; font-weight: 600; }}
+    QLabel#caption, QLabel#emptyHint {{ color: {c['muted']}; }}
+    QLabel#emptyHint {{ background: transparent; }}
+    QToolBar {{ background: {c['bg']}; border: none; border-bottom: 1px solid {c['border']}; spacing: 4px; padding: 8px; }}
+    QToolBar::separator {{ background: {c['border']}; width: 1px; margin: 8px 6px; }}
+    QPushButton, QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 6px 10px; min-height: 22px; }}
+    QPushButton {{ background: {c['panel']}; border-color: {c['border']}; }}
+    QPushButton:hover, QToolButton:hover {{ background: {c['hover']}; }}
+    QPushButton:pressed, QToolButton:pressed, QToolButton:checked {{ background: {c['selected']}; }}
+    QPushButton:focus, QToolButton:focus {{ border-color: {c['accent']}; }}
+    QPushButton:disabled, QToolButton:disabled {{ color: {c['muted']}; }}
+    QTreeWidget, QListWidget {{ background: {c['panel']}; border: none; outline: none; padding: 4px; selection-background-color: {c['selected']}; selection-color: {c['text']}; }}
+    QTreeWidget::item, QListWidget::item {{ padding: 4px 6px; border: none; border-radius: 0; }}
+    QTreeWidget::item:hover, QListWidget::item:hover {{ background: {c['hover']}; }}
+    QTreeWidget::item:selected, QListWidget::item:selected {{ background: {c['selected']}; color: {c['text']}; }}
+    QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; border-radius: 5px; padding: 7px; selection-background-color: {c['selected']}; selection-color: {c['text']}; }}
+    QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{ border-color: {c['accent']}; }}
+    QComboBox QAbstractItemView {{ background: {c['panel']}; color: {c['text']}; selection-background-color: {c['selected']}; selection-color: {c['text']}; }}
+    QCheckBox {{ spacing: 8px; padding: 4px; }}
+    QTabWidget::pane {{ border: none; }}
+    QTabBar::tab {{ background: {c['bg']}; color: {c['muted']}; padding: 10px 14px; border-bottom: 2px solid transparent; }}
+    QTabBar::tab:selected {{ color: {c['text']}; font-weight: 600; border-bottom-color: {c['accent']}; }}
+    QTabBar::tab:hover {{ background: {c['hover']}; }}
+    QSplitter::handle {{ background: {c['border']}; width: 1px; }}
+    QSplitter::handle:hover {{ background: {c['accent']}; }}
+    QDockWidget::title {{ padding: 12px; font-weight: 600; background: {c['bg']}; }}
+    QStatusBar {{ background: {c['bg']}; border-top: 1px solid {c['border']}; color: {c['muted']}; padding: 5px 10px; }}
+    QStatusBar::item {{ border: none; }}
+    QScrollBar:vertical {{ background: {c['panel']}; width: 12px; margin: 0; }}
+    QScrollBar::handle:vertical {{ background: {c['border']}; min-height: 32px; border: 3px solid {c['panel']}; border-radius: 6px; }}
+    QScrollBar::handle:vertical:hover {{ background: {c['muted']}; }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+    '''
