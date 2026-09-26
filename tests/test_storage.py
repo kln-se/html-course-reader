@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from course_reader.storage import Store
+from src.course_reader.storage import Store
 
 
 def test_defaults_and_read_only_initialization(tmp_path):

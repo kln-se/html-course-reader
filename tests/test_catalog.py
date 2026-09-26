@@ -5,7 +5,7 @@ from itertools import permutations
 
 import pytest
 
-from course_reader.catalog import adjacent, link_kind, matches, natural_key, scan
+from src.course_reader.catalog import natural_key, matches, scan, adjacent, link_kind
 
 
 def test_natural_sort_orders_numbers_and_ignores_case():

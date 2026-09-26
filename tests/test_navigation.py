@@ -6,9 +6,9 @@ import pytest
 from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QMessageBox
 
-from course_reader.storage import Store
-from course_reader.viewer import OfflineInterceptor, Page
-from course_reader.window import Window
+from src.course_reader.storage import Store
+from src.course_reader.viewer import Page, OfflineInterceptor
+from src.course_reader.window import Window
 
 
 @pytest.fixture
@@ -128,8 +128,8 @@ def test_internet_link_requires_setting_and_confirmation(
         questions.append(args)
         return answer
 
-    monkeypatch.setattr('course_reader.window.QMessageBox.question', question)
-    monkeypatch.setattr('course_reader.window.QDesktopServices.openUrl', opened.append)
+    monkeypatch.setattr('src.course_reader.window.QMessageBox.question', question)
+    monkeypatch.setattr('src.course_reader.window.QDesktopServices.openUrl', opened.append)
     reader.store.settings['app']['internet_links'] = str(enabled).lower()
     address = 'https://example.com/lesson'
     Window.internet_link(reader, address)
@@ -327,7 +327,7 @@ def lifecycle(reader, monkeypatch):
         else:
             pytest.fail('Unexpected deletion target')
 
-    monkeypatch.setattr('course_reader.window.delete', delete)
+    monkeypatch.setattr('src.course_reader.window.delete', delete)
     return event, calls
 
 

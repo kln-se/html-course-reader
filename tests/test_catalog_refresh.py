@@ -1,10 +1,9 @@
 """Проверки каталога и наблюдения без окон и запуска Проводника."""
-from pathlib import Path
 from types import SimpleNamespace as NS
 import pytest
-from PySide6.QtCore import Qt
-from course_reader.catalog import scan, explorer_arguments
-from course_reader.window import Window
+
+from src.course_reader.catalog import scan, explorer_arguments
+from src.course_reader.window import Window
 
 
 def test_catalog_detects_new_nested_files_and_rename(tmp_path):
@@ -41,9 +40,9 @@ def test_explorer_launch_uses_no_shell_and_missing_path_warns(tmp_path, monkeypa
     page = tmp_path / '1.html'
     page.write_text('page')
     state = NS(root=tmp_path)
-    monkeypatch.setattr('course_reader.window.subprocess.Popen',
+    monkeypatch.setattr('src.course_reader.window.subprocess.Popen',
                         lambda args, **kwargs: opened.append((args, kwargs)))
-    monkeypatch.setattr('course_reader.window.QMessageBox.warning',
+    monkeypatch.setattr('src.course_reader.window.QMessageBox.warning',
                         lambda *args: warned.append(args))
     Window.show_in_explorer(state, page)
     assert opened == [(['explorer.exe', '/select,', str(page)], {'shell': False})]
@@ -212,7 +211,7 @@ def test_rebuild_preserves_selection_expansion_scroll_and_current(tmp_path, monk
     tree = Tree(selected)
     state = NS(root=tmp_path, current=page, tree=tree, items={str(page): selected},
                directory_items={str(folder): expanded}, files=[page])
-    monkeypatch.setattr('course_reader.window.QTreeWidgetItem', Node)
+    monkeypatch.setattr('src.course_reader.window.QTreeWidgetItem', Node)
     Window.rebuild(state, [page, other])
     assert state.files == [page, other]
     assert state.current == page

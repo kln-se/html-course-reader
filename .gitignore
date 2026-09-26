@@ -12,6 +12,10 @@ venv/
 
 # Created by IDE
 .vscode/
+.idea/
 
 # Custom rules
 history.json
+settings.ini
+/build
+/dist

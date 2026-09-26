@@ -13,7 +13,7 @@ def main() -> int:
     создания хранилища или окна выводится в диалоге и возвращает код 1."""
     app = QApplication(sys.argv)
     app.setApplicationName('Course Reader')
-    directory = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent.parent
+    directory = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parents[2]
     try:
         store = Store(directory)
         window = Window(store)

@@ -7,8 +7,8 @@ sys.path.insert(0, str(PROJECT))
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
-from course_reader.storage import Store
-from course_reader.window import Window
+from src.course_reader.storage import Store
+from src.course_reader.window import Window
 
 
 def main() -> int:
