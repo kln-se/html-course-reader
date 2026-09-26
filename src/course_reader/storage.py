@@ -45,6 +45,9 @@ class Store:
                 raise ValueError('Тема должна быть dark или light')
         except ValueError as error:
             raise ValueError(f'Некорректный settings.ini: {error}') from error
+        active = self.data.get('active_course', '')
+        if not isinstance(active, str):
+            raise ValueError('Некорректный активный курс в history.json')
         for root, course in self.data['courses'].items():
             if not isinstance(root, str) or not isinstance(course, dict):
                 raise ValueError('Некорректный курс в history.json')
@@ -77,15 +80,35 @@ class Store:
         return self.data['courses'].setdefault(str(root.resolve()),
             {'last': '', 'scroll': {}, 'favorites': [], 'notes': {}})
 
+    @property
+    def active_course(self) -> Path | None:
+        """Вернуть корень активного курса без проверки существования папки.
+
+        Если выбор отсутствует или не связан с записью курса, вернуть None.
+        """
+        root = self.data.get('active_course', '')
+        return Path(root) if root and root in self.data['courses'] else None
+
+    def activate_course(self, root: Path) -> None:
+        """Сделать курс активным, при необходимости создав его запись в памяти.
+
+        Корень сохраняется как абсолютный путь. Для записи на диск вызвать save().
+        """
+        self.course(root)
+        self.data['active_course'] = str(root.resolve())
+
     def relocate(self, old: str, new: Path) -> None:
         """Перенести запись old на новый абсолютный корень, сохранив относительные пути.
 
+        Ссылка на активный курс также обновляется, если переносится его запись.
         Файлы курса не перемещаются. Занятый другой записью корень вызывает
         ValueError, отсутствующий old — KeyError. Изменение остаётся в памяти."""
         key = str(new.resolve())
         if key != old and key in self.data['courses']:
             raise ValueError('Эта папка уже есть в истории')
         self.data['courses'][key] = self.data['courses'].pop(old)
+        if self.data.get('active_course') == old:
+            self.data['active_course'] = key
 
     def toggle_favorite(self, root: Path, relative: str) -> bool:
         """Переключить избранное для относительного пути и вернуть новое состояние признака."""

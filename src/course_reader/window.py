@@ -198,6 +198,19 @@ class Window(QMainWindow):
         except OSError as error:
             QMessageBox.warning(self, 'Не удалось сохранить данные', str(error))
 
+    def restore_course(self) -> None:
+        """Восстановить активный курс и его существующую последнюю страницу.
+
+        Если активная запись отсутствует или корень не является доступной
+        директорией, показать выбор курса. История без active_course совместима
+        и требует однократного выбора курса.
+        """
+        root = self.store.active_course
+        if root is not None and root.is_dir():
+            self.set_course(root)
+        else:
+            self.choose_course()
+
     def choose_course(self):
         """Показать модальный выбор курса с добавлением папки и заменой корневого пути."""
         dialog = QDialog(self)
@@ -210,6 +223,12 @@ class Window(QMainWindow):
         listing.setFont(interface_font(monospace=True))
         listing.setItemDelegate(RowDelegate(listing))
         listing.addItems(list(self.store.data['courses']))
+        if self.root is not None:
+            matches = listing.findItems(str(self.root), Qt.MatchFlag.MatchExactly)
+            if matches:
+                listing.setCurrentItem(matches[0])
+                listing.scrollToItem(matches[0])
+        listing.setFocus()
         layout.addWidget(listing)
         def select():
             """Открыть выбранный доступный курс; для отсутствующей папки показать пояснение."""
@@ -250,13 +269,19 @@ class Window(QMainWindow):
         dialog.exec()
 
     def set_course(self, root):
-        """Сменить корень курса, перестроить дерево и открыть существующий последний файл."""
+        """Сделать курс активным, сохранить выбор и открыть существующий последний файл.
+
+        Дерево перестраивается для нового корня. Если последнего файла нет,
+        область чтения остаётся пустой; первая страница автоматически не выбирается.
+        """
         self.persist()
         self.catalog_timer.stop()
         self.catalog_fallback.stop()
         self.current = None
         self.root = root.resolve()
         self.view.setUrl(QUrl('about:blank'))
+        self.store.activate_course(self.root)
+        self.persist()
         state = self.store.course(self.root)
         self.rebuild()
         last = self.root / state['last'] if state['last'] else None

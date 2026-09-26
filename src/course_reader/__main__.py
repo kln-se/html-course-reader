@@ -7,8 +7,9 @@ from .window import Window
 
 
 def main() -> int:
-    """Создать приложение, открыть выбор курса и вернуть код завершения Qt.
+    """Создать приложение, восстановить активный курс и вернуть код завершения Qt.
 
+    При отсутствии активного курса или его папки открывается выбор курса.
     Данные размещаются у EXE в сборке или в корне исходников. Ошибка
     создания хранилища или окна выводится в диалоге и возвращает код 1."""
     app = QApplication(sys.argv)
@@ -21,5 +22,5 @@ def main() -> int:
         QMessageBox.critical(None, 'Ошибка запуска', str(error))
         return 1
     window.show()
-    window.choose_course()
+    window.restore_course()
     return app.exec()
