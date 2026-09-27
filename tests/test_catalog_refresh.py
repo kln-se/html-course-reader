@@ -1,9 +1,11 @@
 """Проверки каталога и наблюдения без окон и запуска Проводника."""
 from types import SimpleNamespace as NS
 import pytest
+from PySide6.QtCore import Qt
 
 from src.course_reader.catalog import scan, explorer_arguments
 from src.course_reader.window import Window
+from src.course_reader.theme import TREE_FOLDER_ROLE, TREE_PREFIX_ROLE
 
 
 def test_catalog_detects_new_nested_files_and_rename(tmp_path):
@@ -153,12 +155,20 @@ class Node:
     def __init__(self, parent=None, labels=None):
         self.path = None
         self.expanded = False
+        self.labels = labels or []
+        self.tooltips = {}
+        self.values = {}
+        self.children = []
+        if parent is not None:
+            parent.children.append(self)
     def data(self, column, role):
-        return self.path
+        return self.values.get((column, role), self.path if role == Qt.ItemDataRole.UserRole else None)
     def setData(self, column, role, value):
-        self.path = value
-    def setToolTip(self, *args):
-        pass
+        self.values[column, role] = value
+        if role == Qt.ItemDataRole.UserRole:
+            self.path = value
+    def setToolTip(self, column, value):
+        self.tooltips[column] = value
     def isExpanded(self):
         return self.expanded
     def setExpanded(self, value):
@@ -198,6 +208,66 @@ class Tree:
         return Node()
     def setCurrentItem(self, item):
         self.selected = item
+
+
+@pytest.fixture
+def rebuild_state(tmp_path, monkeypatch):
+    monkeypatch.setattr('src.course_reader.window.QTreeWidgetItem', Node)
+    return NS(root=tmp_path, current=None, tree=Tree(None), items={},
+              directory_items={}, files=[])
+
+
+def test_rebuild_labels_suffixes_without_changing_paths_or_folders(rebuild_state):
+    state = rebuild_state
+    folder = state.root / 'Chapter.HTML' / 'nested'
+    expected = {
+        '01.HTML': '[.html] 01.HTML',
+        '02.HtM': '[.htm] 02.HtM',
+        '03.MP4': '[.mp4] 03.MP4',
+        '04.tar.GZ': '[.gz] 04.tar.GZ',
+        'README': 'README',
+        '.hidden': '.hidden',
+    }
+    files = [folder / name for name in expected]
+    Window.rebuild(state, files)
+    for path in files:
+        item = state.items[str(path)]
+        assert item.labels == [expected[path.name]]
+        assert item.values[0, Qt.ItemDataRole.UserRole] == str(path)
+        assert item.tooltips[0] == path.relative_to(state.root).as_posix()
+    for path in (folder.parent, folder):
+        item = state.directory_items[str(path)]
+        assert item.labels == [path.name]
+        assert item.values[0, Qt.ItemDataRole.UserRole] == str(path)
+        assert item.tooltips[0] == path.relative_to(state.root).as_posix()
+
+
+def test_rebuild_keeps_natural_file_order_with_mixed_suffixes(rebuild_state):
+    state = rebuild_state
+    folder = state.root / 'chapter'
+    folder.mkdir()
+    for name in ['10.html', '2.mp4', '1.txt']:
+        (folder / name).write_text('material', encoding='utf-8')
+    files = scan(state.root, ['*'])
+    Window.rebuild(state, files)
+    expected = [folder / name for name in ['1.txt', '2.mp4', '10.html']]
+    assert state.files == expected
+    assert list(state.items) == [str(path) for path in expected]
+    assert [item.path for item in state.directory_items[str(folder)].children] == [
+        str(path) for path in expected
+    ]
+
+
+def test_clicking_prefixed_file_opens_original_path(rebuild_state):
+    state = rebuild_state
+    page = state.root / 'chapter' / '01.HTML'
+    Window.rebuild(state, [page])
+    opened = []
+    state.open_file = opened.append
+    item = state.items[str(page)]
+    assert item.labels == ['[.html] 01.HTML']
+    Window.tree_clicked(state, item, 0)
+    assert opened == [page]
 
 
 def test_rebuild_preserves_selection_expansion_scroll_and_current(tmp_path, monkeypatch):
@@ -277,3 +347,23 @@ def test_delayed_event_uses_new_root_and_does_nothing_after_close(tmp_path):
     state.catalog_watcher = None
     Window.refresh_catalog(state)
     assert state.files == [new_page]
+
+
+def test_rebuild_style_roles_do_not_replace_paths_or_full_labels(rebuild_state):
+    """Given: папка и разные суффиксы. When: перестройка. Then: стиль отделён от пути."""
+    state = rebuild_state
+    folder = state.root / 'Chapter.HTML'
+    files = [folder / name for name in ('01.HTML', '02.tar.GZ', 'README', '.hidden')]
+    Window.rebuild(state, files)
+    directory = state.directory_items[str(folder)]
+    assert directory.data(0, TREE_FOLDER_ROLE) is True
+    assert directory.data(0, TREE_PREFIX_ROLE) is None
+    assert directory.data(0, Qt.ItemDataRole.UserRole) == str(folder)
+    assert directory.labels == ['Chapter.HTML']
+    for path in files:
+        item = state.items[str(path)]
+        prefix = f'[{path.suffix.lower()}]' if path.suffix else None
+        assert item.data(0, TREE_PREFIX_ROLE) == prefix
+        assert item.data(0, TREE_FOLDER_ROLE) is None
+        assert item.data(0, Qt.ItemDataRole.UserRole) == str(path)
+        assert item.labels == [f'{prefix} {path.name}' if prefix else path.name]

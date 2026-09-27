@@ -1,8 +1,8 @@
 """Единая типографика, палитры и векторные пиктограммы интерфейса читалки."""
-from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt, QPointF
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap, QFontMetrics, QPalette, QTextLayout, QTextCharFormat
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QLabel, QStyle, QStyledItemDelegate
+from PySide6.QtWidgets import QLabel, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 PALETTES = {
     'dark': dict(bg='#20242B', panel='#282D36', text='#E6E9EF', muted='#AFB9C9',
@@ -21,6 +21,8 @@ PATHS = {
     'minus': '<path d="M5 12h14"/>',
     'plus': '<path d="M5 12h14M12 5v14"/>',
     'settings': '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/>',
+    'collapse': '<path d="m4 6 6 6-6 6M20 6l-6 6 6 6"/>',
+    'expand': '<path d="m10 6-6 6 6 6M14 6l6 6-6 6"/>',
     'close': '<path d="m6 6 12 12M18 6 6 18"/>',
 }
 
@@ -75,6 +77,78 @@ class RowDelegate(QStyledItemDelegate):
         return QSize(size.width(), max(size.height(), 32))
 
 
+TREE_PREFIX_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+TREE_FOLDER_ROLE = int(Qt.ItemDataRole.UserRole) + 2
+
+
+class TreeRowDelegate(RowDelegate):
+    """Выделять папки Bold, префиксы Semibold, сохраняя обычное начертание имён файлов."""
+
+    def initStyleOption(self, option, index):
+        """Применить начертание строки; служебные роли не меняют путь и доступное имя."""
+        super().initStyleOption(option, index)
+        option.font.setWeight(QFont.Weight.Bold if index.data(TREE_FOLDER_ROLE) else QFont.Weight.Normal)
+        option.fontMetrics = QFontMetrics(option.font)
+
+    def sizeHint(self, option, index):
+        """Учесть дополнительную ширину полужирного префикса при расчёте строки."""
+        size = super().sizeHint(option, index)
+        prefix = index.data(TREE_PREFIX_ROLE)
+        if prefix:
+            styled = QStyleOptionViewItem(option)
+            self.initStyleOption(styled, index)
+            prefix_font = QFont(styled.font)
+            prefix_font.setWeight(QFont.Weight.DemiBold)
+            extra = QFontMetrics(prefix_font).horizontalAdvance(prefix) - styled.fontMetrics.horizontalAdvance(prefix)
+            size.setWidth(size.width() + max(0, extra))
+        return size
+
+    def paint(self, painter, option, index):
+        """Рисовать фон штатным стилем, а префикс и сокращённое имя — разными начертаниями."""
+        prefix = index.data(TREE_PREFIX_ROLE)
+        if not prefix:
+            super().paint(painter, option, index)
+            return
+        styled = QStyleOptionViewItem(option)
+        self.initStyleOption(styled, index)
+        style = styled.widget.style()
+        text_rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, styled, styled.widget)
+        focused = bool(styled.state & QStyle.StateFlag.State_HasFocus)
+        styled.state &= ~QStyle.StateFlag.State_HasFocus
+        prefix_font = QFont(styled.font)
+        prefix_font.setWeight(QFont.Weight.DemiBold)
+        prefix_width = QFontMetrics(prefix_font).horizontalAdvance(prefix + ' ')
+        name = styled.text[len(prefix) + 1:]
+        name = styled.fontMetrics.elidedText(name, Qt.TextElideMode.ElideMiddle,
+                                           max(0, text_rect.width() - prefix_width))
+        text = prefix + ' ' + name
+        styled.text = ''
+        painter.save()
+        try:
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, styled, painter, styled.widget)
+            painter.setClipRect(text_rect)
+            group = QPalette.ColorGroup.Normal if styled.state & QStyle.StateFlag.State_Enabled else QPalette.ColorGroup.Disabled
+            role = QPalette.ColorRole.HighlightedText if styled.state & QStyle.StateFlag.State_Selected else QPalette.ColorRole.Text
+            painter.setPen(styled.palette.color(group, role))
+            layout = QTextLayout(text, styled.font)
+            emphasis = QTextLayout.FormatRange()
+            emphasis.start = 0
+            emphasis.length = len(prefix)
+            emphasis.format = QTextCharFormat()
+            emphasis.format.setFontWeight(QFont.Weight.DemiBold)
+            layout.setFormats([emphasis])
+            layout.beginLayout()
+            line = layout.createLine()
+            line.setLineWidth(max(1, text_rect.width()))
+            layout.endLayout()
+            layout.draw(painter, QPointF(text_rect.left(), text_rect.top() + (text_rect.height() - line.height()) / 2))
+        finally:
+            painter.restore()
+        if focused:
+            painter.fillRect(QRect(option.rect.left(), option.rect.top() + 5, 3, option.rect.height() - 10),
+                             QColor(self.parent().property('focusColor') or '#8AB4F8'))
+
+
 class EmptyHint(QLabel):
     """Показывать пояснение над пустым списком, не создавая фиктивных элементов."""
     def __init__(self, view, text: str):
@@ -124,6 +198,7 @@ def stylesheet(theme: str) -> str:
     QPushButton:hover, QToolButton:hover {{ background: {c['hover']}; }}
     QPushButton:pressed, QToolButton:pressed, QToolButton:checked {{ background: {c['selected']}; }}
     QPushButton:focus, QToolButton:focus {{ border-color: {c['accent']}; }}
+    QToolButton#treeControl {{ min-height: 0; padding: 0; border-radius: 5px; }}
     QPushButton:disabled, QToolButton:disabled {{ color: {c['muted']}; }}
     QTreeWidget, QListWidget {{ background: {c['panel']}; border: none; outline: none; padding: 4px; selection-background-color: {c['selected']}; selection-color: {c['text']}; }}
     QTreeWidget::item, QListWidget::item {{ padding: 4px 6px; border: none; border-radius: 0; }}

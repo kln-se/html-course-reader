@@ -8,6 +8,11 @@ from pathlib import Path
 from uuid import uuid4
 
 DEFAULT_PATTERNS = ['*.html', '*.htm', '*.mhtml', '*.mht']
+FORMAT_GROUPS = {
+    'pages': DEFAULT_PATTERNS,
+    'video': ['*.mp4', '*.m4v', '*.mpeg', '*.mpg', '*.avi', '*.mkv', '*.webm', '*.mov'],
+    'other': ['*.pdf', '*.txt'],
+}
 
 
 class Store:
@@ -22,22 +27,55 @@ class Store:
         разбора и проверки данных передаются вызывающей стороне; папка не создаётся."""
         self.directory = directory
         self.settings = configparser.ConfigParser(interpolation=None)
-        self.settings['app'] = {'visible_patterns': ', '.join(DEFAULT_PATTERNS),
-                                'internet_links': 'false', 'theme': 'dark', 'zoom': '1.0'}
+        self.settings['app'] = {'internet_links': 'false', 'theme': 'dark', 'zoom': '1.0'}
         settings_path = directory / 'settings.ini'
         if settings_path.exists():
             with settings_path.open(encoding='utf-8') as stream:
                 self.settings.read_file(stream)
+        self._initialize_file_groups()
         history_path = directory / 'history.json'
         self.data = json.loads(history_path.read_text(encoding='utf-8')) if history_path.exists() else {'courses': {}}
         if not isinstance(self.data, dict) or not isinstance(self.data.get('courses'), dict):
             raise ValueError('Некорректный history.json')
         self._validate()
 
+    def _initialize_file_groups(self) -> None:
+        """Подготовить группы масок в памяти, сохранив видимость старого visible_patterns.
+
+        При наличии хотя бы одной новой секции она имеет приоритет над старым
+        полем. Недостающие группы получают значения по умолчанию. На диск
+        изменения попадают только при обычном save().
+        """
+        legacy = self.settings['app'].get('visible_patterns')
+        migrate = legacy is not None and not any(
+            self.settings.has_section('files.' + group) for group in FORMAT_GROUPS)
+        buckets = {group: [] for group in FORMAT_GROUPS}
+        if migrate:
+            for pattern in (part.strip() for part in legacy.split(',')):
+                if not pattern:
+                    continue
+                group = next((name for name in ('pages', 'video')
+                              if pattern.lower() in FORMAT_GROUPS[name]), 'other')
+                buckets[group].append(pattern)
+        for group, defaults in FORMAT_GROUPS.items():
+            section = 'files.' + group
+            if not self.settings.has_section(section):
+                self.settings.add_section(section)
+            values = self.settings[section]
+            masks = buckets[group] if migrate and buckets[group] else defaults
+            enabled = bool(buckets[group]) if migrate else group == 'pages'
+            if 'patterns' not in values:
+                values['patterns'] = ', '.join(masks)
+            if 'enabled' not in values:
+                values['enabled'] = str(enabled).lower()
+        self.settings.remove_option('app', 'visible_patterns')
+
     def _validate(self) -> None:
         """Проверить настройки и структуру истории; отклонить некорректные значения через ValueError."""
         try:
             self.settings.getboolean('app', 'internet_links')
+            for group in FORMAT_GROUPS:
+                self.settings.getboolean('files.' + group, 'enabled')
             zoom = self.settings.getfloat('app', 'zoom')
             if not math.isfinite(zoom) or not 0.25 <= zoom <= 3.0:
                 raise ValueError('Масштаб должен быть от 0.25 до 3.0')
@@ -72,8 +110,12 @@ class Store:
 
     @property
     def patterns(self) -> list[str]:
-        """Вернуть непустые маски из visible_patterns, разделённых запятыми, без краевых пробелов."""
-        return [p.strip() for p in self.settings['app']['visible_patterns'].split(',') if p.strip()]
+        """Вернуть объединение непустых масок включённых групп без изменения их настроек."""
+        return [pattern.strip()
+                for group in FORMAT_GROUPS
+                if self.settings.getboolean('files.' + group, 'enabled')
+                for pattern in self.settings['files.' + group]['patterns'].split(',')
+                if pattern.strip()]
 
     def course(self, root: Path) -> dict:
         """Вернуть изменяемое состояние курса, создав пустую запись для нового абсолютного корня."""

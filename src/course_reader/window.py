@@ -8,13 +8,13 @@ from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListWidget,
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
     QPushButton, QInputDialog, QDockWidget, QWidget, QLineEdit, QCheckBox, QComboBox,
-    QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem)
+    QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem, QHBoxLayout, QToolButton)
 from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
 from .viewer import Page, OfflineInterceptor
 from .storage import Store
-from .theme import EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
+from .theme import TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
 
 
 def format_note_time(value: str) -> str:
@@ -77,8 +77,29 @@ class Window(QMainWindow):
         self.favorites.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.favorites.setAccessibleName('Избранные страницы курса')
         self.favorites.itemClicked.connect(lambda item: self.open_file(self.root / item.data(Qt.ItemDataRole.UserRole)))
+        files_panel = QWidget()
+        files_layout = QVBoxLayout(files_panel)
+        files_layout.setContentsMargins(0, 0, 0, 0)
+        files_layout.setSpacing(0)
+        tree_controls = QHBoxLayout()
+        tree_controls.setContentsMargins(4, 4, 4, 4)
+        tree_controls.setSpacing(4)
+        for label, icon_name, callback in [('Свернуть всё', 'collapse', self.tree.collapseAll),
+                                           ('Развернуть всё', 'expand', self.tree.expandAll)]:
+            button = QToolButton()
+            button.setObjectName('treeControl')
+            button.setFixedSize(30, 30)
+            button.setIconSize(QSize(20, 20))
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            button.clicked.connect(callback)
+            self.icon_actions.append((button, icon_name))
+            tree_controls.addWidget(button)
+        tree_controls.addStretch()
+        files_layout.addLayout(tree_controls)
+        files_layout.addWidget(self.tree)
         tabs = QTabWidget()
-        tabs.addTab(self.tree, 'Файлы')
+        tabs.addTab(files_panel, 'Файлы')
         tabs.addTab(self.favorites, 'Избранное')
         sidebar = QWidget()
         sidebar.setObjectName('sidebar')
@@ -193,7 +214,7 @@ class Window(QMainWindow):
             EmptyHint(self.notes_list, 'Заметок пока нет. Добавьте первую заметку к открытой странице.'),
         ]
         for listing in (self.tree, self.favorites, self.notes_list):
-            listing.setItemDelegate(RowDelegate(listing))
+            listing.setItemDelegate(TreeRowDelegate(listing) if listing is self.tree else RowDelegate(listing))
             listing.setMouseTracking(True)
         self.status_bar = self.statusBar()
         self.status_bar.setFont(interface_font(monospace=True))
@@ -356,12 +377,16 @@ class Window(QMainWindow):
                         folder = self.root.joinpath(*relative.parts[:index + 1])
                         node = QTreeWidgetItem(parent, [name])
                         node.setData(0, Qt.ItemDataRole.UserRole, str(folder))
+                        node.setData(0, TREE_FOLDER_ROLE, True)
                         node.setToolTip(0, key)
                         folders[key] = node
                         self.directory_items[str(folder)] = node
                     parent = folders[key]
-                item = QTreeWidgetItem(parent, [path.name])
+                label = f'[{path.suffix.lower()}] {path.name}' if path.suffix else path.name
+                item = QTreeWidgetItem(parent, [label])
                 item.setData(0, Qt.ItemDataRole.UserRole, str(path))
+                if path.suffix:
+                    item.setData(0, TREE_PREFIX_ROLE, f'[{path.suffix.lower()}]')
                 item.setToolTip(0, relative.as_posix())
                 self.items[str(path)] = item
             target = self.items.get(selected_path) or self.directory_items.get(selected_path)
@@ -518,7 +543,17 @@ class Window(QMainWindow):
 
     def external_file(self, path):
         """После подтверждения передать файл приложению Windows по умолчанию; сообщить об ошибке."""
-        if QMessageBox.question(self, 'Внешний файл', 'Открыть файл в приложении по умолчанию Windows?\n' + str(path)) == QMessageBox.StandardButton.Yes:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Внешний файл')
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText('Открыть файл в приложении по умолчанию Windows?\n' + str(path))
+        dialog.setIcon(QMessageBox.Icon.Question)
+        open_button = dialog.addButton('Открыть', QMessageBox.ButtonRole.AcceptRole)
+        cancel_button = dialog.addButton('Отмена', QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(cancel_button)
+        dialog.setEscapeButton(cancel_button)
+        dialog.exec()
+        if dialog.clickedButton() is open_button:
             if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
                 QMessageBox.warning(self, 'Ошибка открытия', 'Windows не удалось открыть файл.')
 
@@ -718,23 +753,42 @@ class Window(QMainWindow):
         layout = QFormLayout(dialog)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
-        patterns = QLineEdit(self.store.settings['app']['visible_patterns'])
+        group_fields = {}
+        for group, label in [('pages', 'Страницы'), ('video', 'Видео'), ('other', 'Другие файлы')]:
+            values = self.store.settings['files.' + group]
+            enabled = QCheckBox('Показывать')
+            enabled.setChecked(values.getboolean('enabled'))
+            masks = QLineEdit(values['patterns'])
+            masks.setAccessibleName('Маски: ' + label)
+            enabled.setAccessibleName('Показывать: ' + label)
+            masks.setToolTip('Маски через запятую. Отключение группы сохраняет этот список.')
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(enabled)
+            row_layout.addWidget(masks, 1)
+            layout.addRow(label, row)
+            group_fields[group] = (enabled, masks)
         internet = QCheckBox('Разрешать после подтверждения')
         internet.setChecked(self.store.settings.getboolean('app', 'internet_links', fallback=False))
         theme = QComboBox()
         theme.addItem('Графитовая', 'dark')
         theme.addItem('Светлая', 'light')
         theme.setCurrentIndex(1 if self.store.settings['app']['theme'] == 'light' else 0)
-        layout.addRow('Маски файлов для отображения (через запятую)', patterns)
         layout.addRow('Переход по интернет-ссылкам', internet)
         layout.addRow('Тема интерфейса', theme)
         layout.addRow(QLabel('ℹ️ <b>Сетевые запросы самих страниц заблокированы.</b>', textFormat=Qt.TextFormat.RichText))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText('Применить')
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('Отмена')
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addRow(buttons)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.store.settings['app'].update({'visible_patterns': patterns.text(), 'internet_links': str(internet.isChecked()).lower(), 'theme': theme.currentData()})
+            for group, (enabled, masks) in group_fields.items():
+                self.store.settings['files.' + group].update(
+                    {'enabled': str(enabled.isChecked()).lower(), 'patterns': masks.text()})
+            self.store.settings['app'].update({'internet_links': str(internet.isChecked()).lower(), 'theme': theme.currentData()})
             self.persist()
             self.apply_theme()
             self.rebuild()
