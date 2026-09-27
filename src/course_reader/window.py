@@ -1,19 +1,38 @@
 """Интерфейс чтения, выбора курсов и работы с заметками."""
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 from shiboken6 import delete
-from PySide6.QtCore import Qt, QUrl, QTimer, QSize, Slot, QFileSystemWatcher
+from PySide6.QtCore import Qt, QUrl, QTimer, QSize, Slot, QFileSystemWatcher, QDateTime, QLocale
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListWidget,
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
     QPushButton, QInputDialog, QDockWidget, QWidget, QLineEdit, QCheckBox, QComboBox,
-    QDialogButtonBox, QFormLayout, QLabel, QMenu)
+    QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem)
 from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments
+from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
 from .viewer import Page, OfflineInterceptor
 from .storage import Store
 from .theme import EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
+
+
+def format_note_time(value: str) -> str:
+    """Показать ISO-дату в локальном часовом поясе и кратком формате системы.
+
+    Значение без смещения трактуется как UTC. Некорректная дата отображается
+    как «неизвестно»; сохранённая строка истории не изменяется.
+    """
+    try:
+        moment = datetime.fromisoformat(value)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        local = QDateTime.fromMSecsSinceEpoch(int(moment.timestamp() * 1000))
+        if local.isValid():
+            return QLocale.system().toString(local, QLocale.FormatType.ShortFormat)
+    except (ValueError, OverflowError, OSError):
+        pass
+    return 'неизвестно'
 
 
 class Window(QMainWindow):
@@ -132,7 +151,7 @@ class Window(QMainWindow):
         self.find_bar.setIconSize(QSize(20, 20))
         self.action(self.find_bar, 'Закрыть поиск', self.hide_find, icon_name='close', icon_only=True)
         self.find_bar.hide()
-        self.notes_dock = QDockWidget('Заметки к странице', self)
+        self.notes_dock = QDockWidget('Заметки курса', self)
         panel = QWidget()
         panel.setObjectName('sidebar')
         layout = QVBoxLayout(panel)
@@ -140,11 +159,23 @@ class Window(QMainWindow):
         layout.setSpacing(8)
         self.notes_list = QListWidget()
         self.notes_list.setWordWrap(True)
-        self.notes_list.setAccessibleName('Заметки текущей страницы')
+        self.notes_list.setAccessibleName('Заметки всего курса')
+        self.notes_list.currentItemChanged.connect(lambda current, previous: self.update_note_actions())
+        self.notes_list.itemDoubleClicked.connect(
+            lambda item: self.open_note_page() if item.data(Qt.ItemDataRole.UserRole) else None)
+        self.note_buttons = {}
         layout.addWidget(self.notes_list)
-        for label, callback in [('Добавить', self.add_note), ('Изменить', self.edit_note), ('Удалить', self.delete_note)]:
+        self.note_target = QLabel('Нет открытой страницы')
+        self.note_target.setTextFormat(Qt.TextFormat.PlainText)
+        self.note_target.setWordWrap(True)
+        layout.addWidget(self.note_target)
+        for label, callback in [('Добавить', self.add_note), ('Открыть страницу', self.open_note_page), ('Изменить', self.edit_note), ('Удалить', self.delete_note)]:
             button = QPushButton(label)
             button.clicked.connect(callback)
+            button.setEnabled(False)
+            self.note_buttons[label] = button
+            if label == 'Добавить':
+                button.setText('Добавить к открытой странице')
             layout.addWidget(button)
         self.notes_dock.setWidget(panel)
         self.notes_dock.setMinimumWidth(240)
@@ -509,10 +540,9 @@ class Window(QMainWindow):
     def refresh_metadata(self):
         """Обновить избранное, заметки, строку пути и выделение текущего файла в дереве."""
         self.favorites.clear()
-        self.notes_list.clear()
+        self.refresh_notes()
         self.favorite_action.setChecked(False)
         self.favorite_action.setEnabled(self.current is not None)
-        self.notes_action.setText('Заметки (0)')
         if not self.root:
             return
         state = self.store.course(self.root)
@@ -529,10 +559,6 @@ class Window(QMainWindow):
             self.tree.setCurrentItem(item)
             self.tree.scrollToItem(item)
         self.favorite_action.setChecked(relative in state['favorites'])
-        notes = state['notes'].get(relative, [])
-        self.notes_action.setText(f'Заметки ({len(notes)})')
-        for note in notes:
-            self.notes_list.addItem(note['text'] + '\n' + note['updated'])
 
     def toggle_favorite(self):
         """Переключить избранное текущей страницы и сохранить обновлённые данные."""
@@ -541,44 +567,130 @@ class Window(QMainWindow):
             self.persist()
             self.refresh_metadata()
 
+    def refresh_notes(self) -> None:
+        """Показать все заметки курса по страницам, сохраняя выбранную заметку."""
+        selected = self.notes_list.currentItem()
+        selected_key = selected.data(Qt.ItemDataRole.UserRole) if selected else None
+        selected_key = tuple(selected_key) if selected_key else None
+        self.notes_list.clear()
+        count = 0
+        if self.root:
+            groups = self.store.course(self.root)['notes']
+            for relative in sorted(groups, key=natural_key):
+                notes = groups[relative]
+                if not notes:
+                    continue
+                heading = QListWidgetItem(f'{relative} ({len(notes)})')
+                heading.setFlags(Qt.ItemFlag.NoItemFlags)
+                font = heading.font()
+                font.setBold(True)
+                heading.setFont(font)
+                heading.setToolTip(relative)
+                self.notes_list.addItem(heading)
+                for note in notes:
+                    item = QListWidgetItem(note['text'] + '\nИзменено: ' + format_note_time(note['updated']))
+                    key = (str(self.root), relative, note['id'])
+                    item.setData(Qt.ItemDataRole.UserRole, key)
+                    item.setToolTip(relative)
+                    self.notes_list.addItem(item)
+                    if key == selected_key:
+                        self.notes_list.setCurrentItem(item)
+                    count += 1
+        self.notes_action.setText(f'Заметки ({count})')
+        self.update_note_actions()
+
+    def update_note_actions(self) -> None:
+        """Разрешить добавление к открытой странице и действия с выбранной заметкой."""
+        can_add = self.root is not None and self.current is not None
+        self.note_buttons['Добавить'].setEnabled(can_add)
+        target = ('Открытая страница: ' + self.current.relative_to(self.root).as_posix()
+                  if can_add else 'Нет открытой страницы')
+        self.note_target.setText(target)
+        self.note_target.setToolTip(target)
+        selected = self.selected_note() is not None
+        for label in ('Открыть страницу', 'Изменить', 'Удалить'):
+            self.note_buttons[label].setEnabled(selected)
+
     def show_notes(self):
-        """Переключить видимость панели заметок текущей страницы."""
-        self.notes_dock.setVisible(not self.notes_dock.isVisible())
+        """Открыть панель без выбранной заметки либо скрыть уже открытую панель."""
+        opening = not self.notes_dock.isVisible()
+        self.notes_dock.setVisible(opening)
+        if opening:
+            self.notes_list.clearSelection()
+            self.notes_list.setCurrentRow(-1)
+            self.notes_list.clearFocus()
+            self.update_note_actions()
+            if self.current is not None:
+                self.note_buttons['Добавить'].setFocus()
 
     def add_note(self):
-        """Запросить непустой текст новой заметки текущей страницы и сохранить её."""
-        if not self.current:
+        """Добавить заметку к открытой странице независимо от выделения в дереве."""
+        if not self.root or not self.current:
             return
-        text, ok = QInputDialog.getMultiLineText(self, 'Заметка', 'Текст:')
+        root = self.root
+        relative = self.current.relative_to(root).as_posix()
+        text, ok = QInputDialog.getMultiLineText(self, 'Заметка', f'Страница: {relative}\nТекст:')
         if ok and text.strip():
-            self.store.add_note(self.root, self.current.relative_to(self.root).as_posix(), text)
+            self.store.add_note(root, relative, text)
             self.persist()
-            self.refresh_metadata()
+            self.refresh_notes()
 
-    def selected_note(self):
-        """Вернуть выбранную запись заметки текущей страницы либо None при отсутствии выбора."""
-        index = self.notes_list.currentRow()
-        if not self.current or index < 0:
+    def selected_note(self) -> tuple[str, dict] | None:
+        """Вернуть путь и запись выбранной заметки; заголовок или устаревший выбор дают None."""
+        item = self.notes_list.currentItem()
+        key = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not self.root or not key or key[0] != str(self.root):
             return None
-        return self.store.course(self.root)['notes'][self.current.relative_to(self.root).as_posix()][index]
+        _, relative, identifier = key
+        for note in self.store.course(self.root)['notes'].get(relative, []):
+            if note['id'] == identifier:
+                return relative, note
+        return None
+
+    def open_note_page(self) -> None:
+        """Открыть страницу выбранной заметки через обычную проверку доступности файла."""
+        selected = self.selected_note()
+        if selected:
+            relative, _ = selected
+            self.open_file(self.root / relative)
 
     def edit_note(self):
-        """Запросить новый непустой текст выбранной заметки и сохранить изменение."""
-        note = self.selected_note()
-        if note:
-            text, ok = QInputDialog.getMultiLineText(self, 'Изменить заметку', 'Текст:', note['text'])
+        """Изменить выбранную заметку на её странице, даже если отображается другой файл."""
+        selected = self.selected_note()
+        if selected:
+            root = self.root
+            relative, note = selected
+            text, ok = QInputDialog.getMultiLineText(
+                self, 'Изменить заметку', f'Страница: {relative}\nТекст:', note['text'])
             if ok and text.strip():
-                self.store.edit_note(self.root, self.current.relative_to(self.root).as_posix(), note['id'], text)
+                self.store.edit_note(root, relative, note['id'], text)
                 self.persist()
-                self.refresh_metadata()
+                self.refresh_notes()
+
+    def confirm_note_deletion(self, relative: str) -> bool:
+        """Запросить удаление русскими кнопками; закрытие окна и Escape отменяют действие."""
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Удаление заметки')
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(f'Удалить выбранную заметку?\n{relative}')
+        dialog.setIcon(QMessageBox.Icon.Question)
+        remove = dialog.addButton('Удалить', QMessageBox.ButtonRole.DestructiveRole)
+        cancel = dialog.addButton('Отмена', QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(cancel)
+        dialog.setEscapeButton(cancel)
+        dialog.exec()
+        return dialog.clickedButton() is remove
 
     def delete_note(self):
-        """После подтверждения удалить выбранную заметку и обновить панели."""
-        note = self.selected_note()
-        if note and QMessageBox.question(self, 'Удаление', 'Удалить выбранную заметку?') == QMessageBox.StandardButton.Yes:
-            self.store.delete_note(self.root, self.current.relative_to(self.root).as_posix(), note['id'])
-            self.persist()
-            self.refresh_metadata()
+        """Удалить выбранную заметку после подтверждения, сохранив остальные страницы."""
+        selected = self.selected_note()
+        if selected:
+            root = self.root
+            relative, note = selected
+            if self.confirm_note_deletion(relative):
+                self.store.delete_note(root, relative, note['id'])
+                self.persist()
+                self.refresh_notes()
 
     def show_find(self):
         """Показать поиск по странице и передать фокус строке запроса."""
@@ -613,10 +725,10 @@ class Window(QMainWindow):
         theme.addItem('Графитовая', 'dark')
         theme.addItem('Светлая', 'light')
         theme.setCurrentIndex(1 if self.store.settings['app']['theme'] == 'light' else 0)
-        layout.addRow('Маски через запятую', patterns)
-        layout.addRow('Интернет-ссылки', internet)
+        layout.addRow('Маски файлов для отображения (через запятую)', patterns)
+        layout.addRow('Переход по интернет-ссылкам', internet)
         layout.addRow('Тема интерфейса', theme)
-        layout.addRow(QLabel('Сетевые запросы самих страниц заблокированы.'))
+        layout.addRow(QLabel('ℹ️ <b>Сетевые запросы самих страниц заблокированы.</b>', textFormat=Qt.TextFormat.RichText))
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
