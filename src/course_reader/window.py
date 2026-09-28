@@ -3,12 +3,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 from shiboken6 import delete
-from PySide6.QtCore import Qt, QUrl, QTimer, QSize, Slot, QFileSystemWatcher, QDateTime, QLocale
+from PySide6.QtCore import Qt, QUrl, QTimer, QSize, Slot, QFileSystemWatcher, QDateTime, QLocale, QEvent
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListWidget,
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
     QPushButton, QInputDialog, QDockWidget, QWidget, QLineEdit, QCheckBox, QComboBox,
-    QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem, QHBoxLayout, QToolButton)
+    QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem, QHBoxLayout, QToolButton, QApplication)
 from PySide6.QtWebEngineCore import QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
@@ -227,6 +227,42 @@ class Window(QMainWindow):
         self.save_timer = QTimer(self)
         self.save_timer.setSingleShot(True)
         self.save_timer.timeout.connect(self.persist)
+        QApplication.instance().installEventFilter(self)
+
+    def escape_target(self) -> str | None:
+        """Выбрать одну панель для Esc; диалоги, меню и чужие окна имеют приоритет."""
+        if self.closing or QApplication.activeModalWidget() or QApplication.activePopupWidget():
+            return None
+        focus = QApplication.focusWidget()
+        if focus is None or not (focus is self or self.isAncestorOf(focus)):
+            return None
+        if self.notes_dock.isVisible() and (focus is self.notes_dock or self.notes_dock.isAncestorOf(focus)):
+            return 'notes'
+        if self.find_bar.isVisible():
+            return 'find'
+        if self.notes_dock.isVisible():
+            return 'notes'
+        return None
+
+    def eventFilter(self, watched, event):
+        """Обработать одиночный Esc в окне чтения, не перехватывая отмену диалогов."""
+        if event.type() not in (QEvent.Type.ShortcutOverride, QEvent.Type.KeyPress):
+            return False
+        if event.key() != Qt.Key.Key_Escape or event.modifiers() != Qt.KeyboardModifier.NoModifier:
+            return False
+        if not isinstance(watched, QWidget) or not (watched is self or self.isAncestorOf(watched)):
+            return False
+        target = self.escape_target()
+        if target is None:
+            return False
+        event.accept()
+        if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
+            if target == 'find':
+                self.hide_find()
+            else:
+                self.notes_dock.hide()
+                self.view.setFocus()
+        return True
 
     @Slot(str)
     def update_status_tooltip(self, message: str) -> None:
@@ -682,13 +718,26 @@ class Window(QMainWindow):
             if self.current is not None:
                 self.note_buttons['Добавить'].setFocus()
 
+    def note_text_dialog(self, relative: str, text: str = '', *, editing: bool = False) -> tuple[str, bool]:
+        """Запросить многострочную заметку с русскими кнопками и штатной отменой по Esc."""
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle('Изменить заметку' if editing else 'Заметка')
+        dialog.setInputMode(QInputDialog.InputMode.TextInput)
+        dialog.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, True)
+        dialog.setLabelText(f'Страница: {relative}\nТекст:')
+        dialog.setTextValue(text)
+        dialog.setOkButtonText('Сохранить' if editing else 'Добавить')
+        dialog.setCancelButtonText('Отмена')
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        return dialog.textValue(), accepted
+
     def add_note(self):
         """Добавить заметку к открытой странице независимо от выделения в дереве."""
         if not self.root or not self.current:
             return
         root = self.root
         relative = self.current.relative_to(root).as_posix()
-        text, ok = QInputDialog.getMultiLineText(self, 'Заметка', f'Страница: {relative}\nТекст:')
+        text, ok = self.note_text_dialog(relative)
         if ok and text.strip():
             self.store.add_note(root, relative, text)
             self.persist()
@@ -719,8 +768,7 @@ class Window(QMainWindow):
         if selected:
             root = self.root
             relative, note = selected
-            text, ok = QInputDialog.getMultiLineText(
-                self, 'Изменить заметку', f'Страница: {relative}\nТекст:', note['text'])
+            text, ok = self.note_text_dialog(relative, note['text'], editing=True)
             if ok and text.strip():
                 self.store.edit_note(root, relative, note['id'], text)
                 self.persist()
@@ -757,9 +805,10 @@ class Window(QMainWindow):
         self.find_input.setFocus()
 
     def hide_find(self):
-        """Снять выделение результатов поиска и скрыть строку запроса."""
+        """Снять подсветку поиска, скрыть строку запроса и вернуть фокус на страницу."""
         self.view.findText('')
         self.find_bar.hide()
+        self.view.setFocus()
 
     def zoom(self, delta):
         """Изменить масштаб страницы на delta в пределах 0.25–3.0 и сохранить значение."""
@@ -833,6 +882,9 @@ class Window(QMainWindow):
             event.accept()
             return
         self.closing = True
+        application = QApplication.instance()
+        if application is not None:
+            application.removeEventFilter(self)
         self.navigation_generation += 1
         self.loading = True
         self.save_timer.stop()

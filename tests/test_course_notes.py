@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QDialog, QInputDialog, QMessageBox
 
 from src.course_reader.storage import Store
 from src.course_reader.window import Window
@@ -95,7 +95,7 @@ def reader(tmp_path, monkeypatch):
     monkeypatch.setattr('src.course_reader.window.QListWidgetItem', NoteItem)
     state.dialog = Mock(return_value=('new text', True))
     state.warning = Mock()
-    monkeypatch.setattr('src.course_reader.window.QInputDialog.getMultiLineText', state.dialog)
+    state.note_text_dialog = state.dialog
     monkeypatch.setattr('src.course_reader.window.QMessageBox.warning', state.warning)
     return state
 
@@ -159,7 +159,7 @@ def test_add_targets_displayed_page_even_when_other_page_note_selected(reader):
     notes = reader.store.course(reader.root)['notes']
     assert [note['text'] for note in notes['1.html']] == ['new text']
     assert notes['2.html'] == [other]
-    assert '1.html' in reader.dialog.call_args.args[2]
+    reader.dialog.assert_called_once_with('1.html')
     reader.persist.assert_called_once_with()
 
 
@@ -172,7 +172,7 @@ def test_edit_targets_selected_page_and_preserves_same_id_on_current_page(reader
     assert other['text'] == 'new text'
     assert current['text'] == 'current'
     assert reader.selected_note() == ('2.html', other)
-    assert reader.dialog.call_args.args[3] == 'other'
+    reader.dialog.assert_called_once_with('2.html', 'other', editing=True)
     reader.persist.assert_called_once_with()
 
 
@@ -346,4 +346,31 @@ def test_confirm_deletion_uses_russian_buttons_and_defaults_to_cancel(reader, mo
     ]
     dialog.setDefaultButton.assert_called_once_with(cancel)
     dialog.setEscapeButton.assert_called_once_with(cancel)
+    dialog.exec.assert_called_once_with()
+
+
+@pytest.mark.parametrize('editing', [False, True])
+@pytest.mark.parametrize('result', [QDialog.DialogCode.Accepted, QDialog.DialogCode.Rejected])
+def test_note_text_dialog_uses_russian_buttons_and_returns_acceptance(monkeypatch, editing, result):
+    """Given: создание или правка заметки. When: диалог закрыт. Then: русские кнопки и верный результат."""
+    parent = object()
+    dialog = Mock()
+    dialog.exec.return_value = result
+    dialog.textValue.return_value = 'Первая строка\nВторая строка'
+    factory = Mock(return_value=dialog)
+    factory.InputMode = QInputDialog.InputMode
+    factory.InputDialogOption = QInputDialog.InputDialogOption
+    monkeypatch.setattr('src.course_reader.window.QInputDialog', factory)
+
+    assert Window.note_text_dialog(parent, 'chapter/2.html', 'Исходный текст', editing=editing) == (
+        'Первая строка\nВторая строка', result == QDialog.DialogCode.Accepted)
+
+    factory.assert_called_once_with(parent)
+    dialog.setWindowTitle.assert_called_once_with('Изменить заметку' if editing else 'Заметка')
+    dialog.setInputMode.assert_called_once_with(QInputDialog.InputMode.TextInput)
+    dialog.setOption.assert_called_once_with(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, True)
+    dialog.setLabelText.assert_called_once_with('Страница: chapter/2.html\nТекст:')
+    dialog.setTextValue.assert_called_once_with('Исходный текст')
+    dialog.setOkButtonText.assert_called_once_with('Сохранить' if editing else 'Добавить')
+    dialog.setCancelButtonText.assert_called_once_with('Отмена')
     dialog.exec.assert_called_once_with()
