@@ -22,6 +22,7 @@ PATHS = {
     'plus': '<path d="M5 12h14M12 5v14"/>',
     'settings': '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/>',
     'collapse': '<path d="m4 6 6 6-6 6M20 6l-6 6 6 6"/>',
+    'locate': '<circle cx="12" cy="12" r="7"/><path d="M12 2v20M2 12h20"/>',
     'expand': '<path d="m10 6-6 6 6 6M14 6l6 6-6 6"/>',
     'close': '<path d="m6 6 12 12M18 6 6 18"/>',
 }

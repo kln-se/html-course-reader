@@ -159,8 +159,11 @@ class Node:
         self.tooltips = {}
         self.values = {}
         self.children = []
+        self._parent = parent
         if parent is not None:
             parent.children.append(self)
+    def parent(self):
+        return self._parent if self._parent is not None and self._parent.path else None
     def data(self, column, role):
         return self.values.get((column, role), self.path if role == Qt.ItemDataRole.UserRole else None)
     def setData(self, column, role, value):
@@ -213,8 +216,11 @@ class Tree:
 @pytest.fixture
 def rebuild_state(tmp_path, monkeypatch):
     monkeypatch.setattr('src.course_reader.window.QTreeWidgetItem', Node)
-    return NS(root=tmp_path, current=None, tree=Tree(None), items={},
-              directory_items={}, files=[])
+    state = NS(root=tmp_path, current=None, tree=Tree(None), items={},
+               directory_items={}, files=[], focus_page_button=NS(enabled=False))
+    state.focus_page_button.setEnabled = lambda value: setattr(state.focus_page_button, 'enabled', value)
+    state.update_focus_button = lambda: Window.update_focus_button(state)
+    return state
 
 
 def test_rebuild_labels_suffixes_without_changing_paths_or_folders(rebuild_state):
@@ -270,7 +276,7 @@ def test_clicking_prefixed_file_opens_original_path(rebuild_state):
     assert opened == [page]
 
 
-def test_rebuild_preserves_selection_expansion_scroll_and_current(tmp_path, monkeypatch):
+def test_rebuild_preserves_selection_expansion_scroll_and_current(tmp_path, monkeypatch, rebuild_state):
     folder = tmp_path / 'chapter'
     page = folder / '1.html'
     other = folder / '2.html'
@@ -279,8 +285,10 @@ def test_rebuild_preserves_selection_expansion_scroll_and_current(tmp_path, monk
     expanded = Node()
     expanded.expanded = True
     tree = Tree(selected)
-    state = NS(root=tmp_path, current=page, tree=tree, items={str(page): selected},
-               directory_items={str(folder): expanded}, files=[page])
+    state = rebuild_state
+    state.current, state.tree = page, tree
+    state.items, state.directory_items = {str(page): selected}, {str(folder): expanded}
+    state.files = [page]
     monkeypatch.setattr('src.course_reader.window.QTreeWidgetItem', Node)
     Window.rebuild(state, [page, other])
     assert state.files == [page, other]

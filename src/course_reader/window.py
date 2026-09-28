@@ -85,7 +85,8 @@ class Window(QMainWindow):
         tree_controls.setContentsMargins(4, 4, 4, 4)
         tree_controls.setSpacing(4)
         for label, icon_name, callback in [('Свернуть всё', 'collapse', self.tree.collapseAll),
-                                           ('Развернуть всё', 'expand', self.tree.expandAll)]:
+                                           ('Развернуть всё', 'expand', self.tree.expandAll),
+                                           ('Показать текущую страницу в дереве', 'locate', self.focus_current_page)]:
             button = QToolButton()
             button.setObjectName('treeControl')
             button.setFixedSize(30, 30)
@@ -94,6 +95,9 @@ class Window(QMainWindow):
             button.setAccessibleName(label)
             button.clicked.connect(callback)
             self.icon_actions.append((button, icon_name))
+            if icon_name == 'locate':
+                self.focus_page_button = button
+                button.setEnabled(False)
             tree_controls.addWidget(button)
         tree_controls.addStretch()
         files_layout.addLayout(tree_controls)
@@ -400,6 +404,25 @@ class Window(QMainWindow):
             self.tree.horizontalScrollBar().setValue(horizontal)
         finally:
             self.tree.setUpdatesEnabled(True)
+            self.update_focus_button()
+
+    def update_focus_button(self) -> None:
+        """Разрешить поиск текущей страницы только при наличии её строки в дереве."""
+        self.focus_page_button.setEnabled(
+            self.current is not None and str(self.current) in self.items)
+
+    def focus_current_page(self) -> None:
+        """Раскрыть путь к открытой странице и сфокусировать её строку без загрузки HTML."""
+        item = self.items.get(str(self.current)) if self.current is not None else None
+        if item is None:
+            return
+        parent = item.parent()
+        while parent is not None:
+            parent.setExpanded(True)
+            parent = parent.parent()
+        self.tree.setCurrentItem(item)
+        self.tree.scrollToItem(item)
+        self.tree.setFocus()
 
     def sync_catalog_watches(self, directories: list[Path]) -> None:
         """Обновить наблюдение, включая пустые папки; при отказах включить резервный опрос."""
@@ -574,6 +597,7 @@ class Window(QMainWindow):
 
     def refresh_metadata(self):
         """Обновить избранное, заметки, строку пути и выделение текущего файла в дереве."""
+        self.update_focus_button()
         self.favorites.clear()
         self.refresh_notes()
         self.favorite_action.setChecked(False)
