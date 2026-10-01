@@ -9,12 +9,12 @@ from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListW
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
     QPushButton, QInputDialog, QDockWidget, QWidget, QLineEdit, QCheckBox, QComboBox,
     QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem, QHBoxLayout, QToolButton, QApplication)
-from PySide6.QtWebEngineCore import QWebEngineProfile
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
 from .viewer import Page, OfflineInterceptor
 from .storage import Store
-from .theme import TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
+from .theme import style_checkbox, TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
 
 
 def format_note_time(value: str) -> str:
@@ -126,6 +126,8 @@ class Window(QMainWindow):
         self.profile.setUrlRequestInterceptor(self.interceptor)
         self.page = Page(self.profile, self.view)
         self.view.setPage(self.page)
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(self.page_context_menu)
         self.page.allow_local = self.allow_local
         self.view.loadStarted.connect(self.load_started)
         self.page.internet_requested.connect(self.internet_link)
@@ -799,6 +801,40 @@ class Window(QMainWindow):
                 self.persist()
                 self.refresh_notes()
 
+    def page_context_menu(self, position) -> None:
+        """Показать русское меню чтения с навигацией по файлам курса.
+
+        Копирование и выделение выполняет WebEngine; переходы используют
+        те же правила и сообщения о границах, что и кнопки панели.
+        """
+        menu = QMenu(self)
+        try:
+            previous = menu.addAction('Предыдущая страница')
+            following = menu.addAction('Следующая страница')
+            previous.setEnabled(self.root is not None)
+            following.setEnabled(self.root is not None)
+            menu.addSeparator()
+            copy = menu.addAction('Копировать')
+            copy.setEnabled(self.page.hasSelection())
+            select_all = menu.addAction('Выделить всё')
+            select_all.setEnabled(self.current is not None)
+            menu.addSeparator()
+            find = menu.addAction('Найти на странице')
+            find.setEnabled(self.current is not None)
+            selected = menu.exec(self.view.mapToGlobal(position))
+            if selected is previous:
+                self.move(-1)
+            elif selected is following:
+                self.move(1)
+            elif selected is copy:
+                self.page.triggerAction(QWebEnginePage.WebAction.Copy)
+            elif selected is select_all:
+                self.page.triggerAction(QWebEnginePage.WebAction.SelectAll)
+            elif selected is find:
+                self.show_find()
+        finally:
+            menu.deleteLater()
+
     def show_find(self):
         """Показать поиск по странице и передать фокус строке запроса."""
         self.find_bar.show()
@@ -830,6 +866,7 @@ class Window(QMainWindow):
         for group, label in [('pages', 'Страницы'), ('video', 'Видео'), ('other', 'Другие файлы')]:
             values = self.store.settings['files.' + group]
             enabled = QCheckBox('Показывать')
+            style_checkbox(enabled, self.store.settings['app']['theme'])
             enabled.setChecked(values.getboolean('enabled'))
             masks = QLineEdit(values['patterns'])
             masks.setAccessibleName('Маски: ' + label)
@@ -843,6 +880,7 @@ class Window(QMainWindow):
             layout.addRow(label, row)
             group_fields[group] = (enabled, masks)
         internet = QCheckBox('Разрешать после подтверждения')
+        style_checkbox(internet, self.store.settings['app']['theme'])
         internet.setChecked(self.store.settings.getboolean('app', 'internet_links', fallback=False))
         theme = QComboBox()
         theme.addItem('Графитовая', 'dark')

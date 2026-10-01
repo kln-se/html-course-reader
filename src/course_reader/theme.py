@@ -2,7 +2,7 @@
 from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt, QPointF
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap, QFontMetrics, QPalette, QTextLayout, QTextCharFormat
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QLabel, QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PySide6.QtWidgets import QCheckBox, QStyleFactory, QLabel, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 PALETTES = {
     'dark': dict(bg='#20242B', panel='#282D36', text='#E6E9EF', muted='#AFB9C9',
@@ -26,6 +26,33 @@ PATHS = {
     'expand': '<path d="m10 6-6 6 6 6M14 6l6 6-6 6"/>',
     'close': '<path d="m6 6 12 12M18 6 6 18"/>',
 }
+
+
+def style_checkbox(checkbox: QCheckBox, theme: str) -> None:
+    """Оформить индикатор по теме приложения независимо от темы Windows.
+
+    Отдельный стиль Fusion принадлежит чекбоксу и уничтожается вместе с ним.
+    Фон и цвет галочки задаются явно для активного и неактивного окна.
+    """
+    colors = PALETTES.get(theme, PALETTES['dark'])
+    style = QStyleFactory.create('Fusion')
+    style.setParent(checkbox)
+    checkbox.setStyle(style)
+    palette = QPalette()
+    for role, color in (
+        (QPalette.ColorRole.Window, colors['bg']),
+        (QPalette.ColorRole.Base, colors['panel']),
+        (QPalette.ColorRole.Button, colors['panel']),
+        (QPalette.ColorRole.Text, colors['text']),
+        (QPalette.ColorRole.WindowText, colors['text']),
+        (QPalette.ColorRole.ButtonText, colors['text']),
+        (QPalette.ColorRole.Highlight, colors['accent']),
+        (QPalette.ColorRole.HighlightedText, colors['panel']),
+    ):
+        palette.setColor(role, QColor(color))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(colors['muted']))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(colors['muted']))
+    checkbox.setPalette(palette)
 
 
 def interface_font(monospace: bool = False) -> QFont:
