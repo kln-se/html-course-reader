@@ -1,5 +1,6 @@
 """Проверки каталога и наблюдения без окон и запуска Проводника."""
 from types import SimpleNamespace as NS
+from unittest.mock import Mock
 import pytest
 from PySide6.QtCore import Qt
 
@@ -155,6 +156,7 @@ class Node:
     def __init__(self, parent=None, labels=None):
         self.path = None
         self.expanded = False
+        self.hidden = False
         self.labels = labels or []
         self.tooltips = {}
         self.values = {}
@@ -172,6 +174,8 @@ class Node:
             self.path = value
     def setToolTip(self, column, value):
         self.tooltips[column] = value
+    def setHidden(self, value):
+        self.hidden = value
     def isExpanded(self):
         return self.expanded
     def setExpanded(self, value):
@@ -213,12 +217,42 @@ class Tree:
         self.selected = item
 
 
+class SearchField:
+    """Имитировать textChanged при изменении строки без создания QApplication."""
+    def __init__(self, changed):
+        self.value = ''
+        self.visible = False
+        self.changed = changed
+        self.setFocus = Mock()
+    def text(self):
+        return self.value
+    def setText(self, value):
+        if value != self.value:
+            self.value = value
+            self.changed(value)
+    def clear(self):
+        self.setText('')
+    def show(self):
+        self.visible = True
+    def hide(self):
+        self.visible = False
+    def isVisible(self):
+        return self.visible
+
+
 @pytest.fixture
 def rebuild_state(tmp_path, monkeypatch):
     monkeypatch.setattr('src.course_reader.window.QTreeWidgetItem', Node)
     state = NS(root=tmp_path, current=None, tree=Tree(None), items={},
                directory_items={}, files=[], focus_page_button=NS(enabled=False))
     state.focus_page_button.setEnabled = lambda value: setattr(state.focus_page_button, 'enabled', value)
+    state.tree_search_expanded = None
+    state.tree_search_empty = NS(visible=False)
+    state.tree_search_empty.setVisible = lambda value: setattr(state.tree_search_empty, 'visible', value)
+    state.filter_tree = lambda text='': Window.filter_tree(state, text)
+    state.tree_search = SearchField(state.filter_tree)
+    state.tree.scrollToItem = Mock()
+    state.tree.setFocus = Mock()
     state.update_focus_button = lambda: Window.update_focus_button(state)
     return state
 

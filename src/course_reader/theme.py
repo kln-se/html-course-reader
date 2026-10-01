@@ -234,6 +234,7 @@ def stylesheet(theme: str) -> str:
     QTreeWidget::item:selected, QListWidget::item:selected {{ background: {c['selected']}; color: {c['text']}; }}
     QLineEdit, QTextEdit, QPlainTextEdit, QComboBox {{ background: {c['panel']}; color: {c['text']}; border: 1px solid {c['border']}; border-radius: 5px; padding: 7px; selection-background-color: {c['selected']}; selection-color: {c['text']}; }}
     QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{ border-color: {c['accent']}; }}
+    QLineEdit QToolButton {{ padding: 0; min-height: 0; min-width: 0; border: none; border-radius: 0; }}
     QComboBox QAbstractItemView {{ background: {c['panel']}; color: {c['text']}; selection-background-color: {c['selected']}; selection-color: {c['text']}; }}
     QCheckBox {{ spacing: 8px; padding: 4px; }}
     QTabWidget::pane {{ border: none; }}

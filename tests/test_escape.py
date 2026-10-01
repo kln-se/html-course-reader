@@ -15,9 +15,13 @@ def escape_state(monkeypatch):
     notes_child, page_child, foreign = object(), object(), object()
     state = SimpleNamespace(
         closing=False, notes_dock=Mock(), find_bar=Mock(), view=Mock(), hide_find=Mock(),
+        tree_search=Mock(), tree=Mock(),
     )
     state.isAncestorOf = lambda widget: any(widget is own for own in (
         state.notes_dock, notes_child, page_child))
+    state.tree_search.isVisible.return_value = False
+    state.tree_search.isAncestorOf.return_value = False
+    state.tree.isAncestorOf.return_value = False
     state.notes_dock.isAncestorOf.side_effect = lambda widget: widget is notes_child
     state.notes_dock.isVisible.return_value = True
     state.find_bar.isVisible.return_value = True
@@ -69,7 +73,7 @@ def filtered_event():
     child = Mock(spec=QWidget)
     state = SimpleNamespace(
         isAncestorOf=lambda widget: widget is child, escape_target=Mock(return_value='find'),
-        hide_find=Mock(), notes_dock=Mock(), view=Mock(),
+        hide_find=Mock(), notes_dock=Mock(), view=Mock(), hide_tree_search=Mock(),
     )
     event = Mock()
     event.type.return_value = QEvent.Type.KeyPress
@@ -79,7 +83,7 @@ def filtered_event():
     return state, child, event
 
 
-@pytest.mark.parametrize('target', ['find', 'notes'])
+@pytest.mark.parametrize('target', ['find', 'notes', 'tree_search'])
 @pytest.mark.parametrize('event_type,repeat,closes', [
     (QEvent.Type.ShortcutOverride, False, False),
     (QEvent.Type.KeyPress, False, True),
@@ -96,6 +100,7 @@ def test_escape_claims_shortcut_but_closes_one_panel_only_on_initial_press(
     assert Window.eventFilter(state, child, event) is True
 
     event.accept.assert_called_once_with()
+    assert state.hide_tree_search.call_count == int(closes and target == 'tree_search')
     assert state.hide_find.call_count == int(closes and target == 'find')
     assert state.notes_dock.hide.call_count == int(closes and target == 'notes')
     assert state.view.setFocus.call_count == int(closes and target == 'notes')
@@ -122,6 +127,7 @@ def test_unhandled_events_are_not_accepted_or_used_to_close_panels(filtered_even
     assert Window.eventFilter(state, watched, event) is False
 
     event.accept.assert_not_called()
+    state.hide_tree_search.assert_not_called()
     state.hide_find.assert_not_called()
     state.notes_dock.hide.assert_not_called()
     state.view.setFocus.assert_not_called()

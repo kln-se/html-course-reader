@@ -52,6 +52,7 @@ class Window(QMainWindow):
         self.files = []
         self.items = {}
         self.directory_items = {}
+        self.tree_search_expanded = None
         self.setWindowTitle('Course Reader')
         self.resize(1200, 800)
         self.setMinimumSize(760, 520)
@@ -86,7 +87,8 @@ class Window(QMainWindow):
         tree_controls.setSpacing(4)
         for label, icon_name, callback in [('Свернуть всё', 'collapse', self.tree.collapseAll),
                                            ('Развернуть всё', 'expand', self.tree.expandAll),
-                                           ('Показать текущую страницу в дереве', 'locate', self.focus_current_page)]:
+                                           ('Показать текущую страницу в дереве', 'locate', self.focus_current_page),
+                                           ('Найти файл', 'search', self.show_tree_search)]:
             button = QToolButton()
             button.setObjectName('treeControl')
             button.setFixedSize(30, 30)
@@ -101,6 +103,18 @@ class Window(QMainWindow):
             tree_controls.addWidget(button)
         tree_controls.addStretch()
         files_layout.addLayout(tree_controls)
+        self.tree_search = QLineEdit()
+        self.tree_search.setPlaceholderText('Найти файл…')
+        self.tree_search.setAccessibleName('Поиск по имени и пути файла')
+        self.tree_search.setClearButtonEnabled(True)
+        self.tree_search.textChanged.connect(self.filter_tree)
+        self.tree_search.hide()
+        files_layout.addWidget(self.tree_search)
+        self.tree_search_empty = QLabel('Ничего не найдено')
+        self.tree_search_empty.setObjectName('caption')
+        self.tree_search_empty.setContentsMargins(8, 8, 8, 8)
+        self.tree_search_empty.hide()
+        files_layout.addWidget(self.tree_search_empty)
         files_layout.addWidget(self.tree)
         tabs = QTabWidget()
         tabs.addTab(files_panel, 'Файлы')
@@ -240,10 +254,15 @@ class Window(QMainWindow):
             return None
         if self.notes_dock.isVisible() and (focus is self.notes_dock or self.notes_dock.isAncestorOf(focus)):
             return 'notes'
+        if self.tree_search.isVisible() and (focus is self.tree_search or self.tree_search.isAncestorOf(focus)
+                                              or focus is self.tree or self.tree.isAncestorOf(focus)):
+            return 'tree_search'
         if self.find_bar.isVisible():
             return 'find'
         if self.notes_dock.isVisible():
             return 'notes'
+        if self.tree_search.isVisible():
+            return 'tree_search'
         return None
 
     def eventFilter(self, watched, event):
@@ -259,7 +278,9 @@ class Window(QMainWindow):
             return False
         event.accept()
         if event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat():
-            if target == 'find':
+            if target == 'tree_search':
+                self.hide_tree_search()
+            elif target == 'find':
                 self.hide_find()
             else:
                 self.notes_dock.hide()
@@ -372,6 +393,8 @@ class Window(QMainWindow):
         self.catalog_timer.stop()
         self.catalog_fallback.stop()
         self.current = None
+        self.tree_search.clear()
+        self.tree_search.hide()
         self.root = root.resolve()
         self.view.setUrl(QUrl('about:blank'))
         self.store.activate_course(self.root)
@@ -441,6 +464,7 @@ class Window(QMainWindow):
             self.tree.verticalScrollBar().setValue(vertical)
             self.tree.horizontalScrollBar().setValue(horizontal)
         finally:
+            self.filter_tree()
             self.tree.setUpdatesEnabled(True)
             self.update_focus_button()
 
@@ -454,6 +478,7 @@ class Window(QMainWindow):
         item = self.items.get(str(self.current)) if self.current is not None else None
         if item is None:
             return
+        self.tree_search.clear()
         parent = item.parent()
         while parent is not None:
             parent.setExpanded(True)
@@ -461,6 +486,58 @@ class Window(QMainWindow):
         self.tree.setCurrentItem(item)
         self.tree.scrollToItem(item)
         self.tree.setFocus()
+
+    def show_tree_search(self) -> None:
+        """Показать строку поиска над деревом и передать ей фокус."""
+        self.tree_search.show()
+        self.tree_search.setFocus()
+
+    def hide_tree_search(self) -> None:
+        """Снять поисковый фильтр, закрыть строку и вернуть фокус дереву."""
+        self.tree_search.clear()
+        self.tree_search.hide()
+        self.tree.setFocus()
+
+    def filter_tree(self, _text: str = '') -> None:
+        """Отфильтровать строки по относительному пути без изменения навигации.
+
+        Раскрыть родителей совпадений. При очистке вернуть прежнее раскрытие
+        папок и показать открытую страницу; HTML повторно не загружается.
+        Повторное применение после обновления каталога сохраняет запрос.
+        """
+        query = self.tree_search.text().strip().replace('\\', '/').casefold()
+        if query and self.tree_search_expanded is None:
+            self.tree_search_expanded = {
+                path for path, item in self.directory_items.items() if item.isExpanded()}
+        visible_folders = set()
+        matches = 0
+        for path, item in self.items.items():
+            relative = Path(path).relative_to(self.root).as_posix()
+            matches_query = query in relative.casefold()
+            item.setHidden(not matches_query)
+            if matches_query:
+                matches += 1
+                parent = item.parent()
+                while parent is not None:
+                    visible_folders.add(parent.data(0, Qt.ItemDataRole.UserRole))
+                    parent = parent.parent()
+        for path, item in self.directory_items.items():
+            item.setHidden(bool(query) and path not in visible_folders)
+            if query and path in visible_folders:
+                item.setExpanded(True)
+        self.tree_search_empty.setVisible(bool(query) and matches == 0)
+        if not query and self.tree_search_expanded is not None:
+            for path, item in self.directory_items.items():
+                item.setExpanded(path in self.tree_search_expanded)
+            self.tree_search_expanded = None
+            current = self.items.get(str(self.current))
+            if current is not None:
+                parent = current.parent()
+                while parent is not None:
+                    parent.setExpanded(True)
+                    parent = parent.parent()
+                self.tree.setCurrentItem(current)
+                self.tree.scrollToItem(current)
 
     def sync_catalog_watches(self, directories: list[Path]) -> None:
         """Обновить наблюдение, включая пустые папки; при отказах включить резервный опрос."""

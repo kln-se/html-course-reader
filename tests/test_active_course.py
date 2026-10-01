@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 import json
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -79,7 +80,7 @@ def course_window(tmp_path):
     """Оставить реальную логику курса и заменить границы отображения Qt."""
     opened, messages, chooser = [], [], []
     state = SimpleNamespace(
-        store=Store(tmp_path), root=None, current=None,
+        store=Store(tmp_path), root=None, current=None, tree_search=Mock(),
         catalog_timer=SimpleNamespace(stop=lambda: None),
         catalog_fallback=SimpleNamespace(stop=lambda: None),
         view=SimpleNamespace(setUrl=lambda url: None),
