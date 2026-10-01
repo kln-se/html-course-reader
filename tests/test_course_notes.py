@@ -84,6 +84,7 @@ def reader(tmp_path, monkeypatch):
     state = SimpleNamespace(
         root=root, current=root / '1.html', store=Store(tmp_path),
         notes_list=NotesList(), notes_action=Mock(), persist=Mock(),
+        notes_search=Mock(text=Mock(return_value='')), notes_hint=Mock(),
         note_target=Mock(), notes_dock=Mock(),
         confirm_note_deletion=Mock(return_value=True),
         note_buttons={label: Mock() for label in

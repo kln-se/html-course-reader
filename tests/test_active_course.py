@@ -81,6 +81,7 @@ def course_window(tmp_path):
     opened, messages, chooser = [], [], []
     state = SimpleNamespace(
         store=Store(tmp_path), root=None, current=None, tree_search=Mock(),
+        notes_search=Mock(),
         catalog_timer=SimpleNamespace(stop=lambda: None),
         catalog_fallback=SimpleNamespace(stop=lambda: None),
         view=SimpleNamespace(setUrl=lambda url: None),

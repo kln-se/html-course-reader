@@ -134,6 +134,7 @@ def test_course_switch_resets_query_and_snapshot(search_state):
     new_root = state.root / 'new'
     new_root.mkdir()
     state.persist = Mock()
+    state.notes_search = Mock()
     state.catalog_timer = Mock()
     state.catalog_fallback = Mock()
     state.store = NS(patterns=['*.html'], activate_course=Mock(), course=lambda root: {'last': ''})

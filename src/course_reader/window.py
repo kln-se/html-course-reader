@@ -198,6 +198,12 @@ class Window(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
+        self.notes_search = QLineEdit()
+        self.notes_search.setPlaceholderText('Найти заметку…')
+        self.notes_search.setAccessibleName('Поиск по тексту заметок курса')
+        self.notes_search.setClearButtonEnabled(True)
+        self.notes_search.textChanged.connect(lambda _text: self.refresh_notes())
+        layout.addWidget(self.notes_search)
         self.notes_list = QListWidget()
         self.notes_list.setWordWrap(True)
         self.notes_list.setAccessibleName('Заметки всего курса')
@@ -228,10 +234,11 @@ class Window(QMainWindow):
             zoom = 1.0
         self.view.setZoomFactor(max(0.25, min(3.0, zoom)))
         self.zoom_label.setText(f'{self.view.zoomFactor():.0%}')
+        self.notes_hint = EmptyHint(self.notes_list, 'Заметок пока нет. Добавьте первую заметку к открытой странице.')
         self.hints = [
             EmptyHint(self.tree, 'Выберите курс кнопкой «Курсы». Если файлы скрыты, проверьте маски в настройках.'),
             EmptyHint(self.favorites, 'Важные страницы будут здесь. Нажмите «Избранное» при чтении.'),
-            EmptyHint(self.notes_list, 'Заметок пока нет. Добавьте первую заметку к открытой странице.'),
+            self.notes_hint,
         ]
         for listing in (self.tree, self.favorites, self.notes_list):
             listing.setItemDelegate(TreeRowDelegate(listing) if listing is self.tree else RowDelegate(listing))
@@ -396,6 +403,7 @@ class Window(QMainWindow):
         self.tree_search.clear()
         self.tree_search.hide()
         self.root = root.resolve()
+        self.notes_search.clear()
         self.view.setUrl(QUrl('about:blank'))
         self.store.activate_course(self.root)
         self.persist()
@@ -742,16 +750,24 @@ class Window(QMainWindow):
             self.refresh_metadata()
 
     def refresh_notes(self) -> None:
-        """Показать все заметки курса по страницам, сохраняя выбранную заметку."""
+        """Показать совпавшие по тексту заметки, сохранив группировку и общий счётчик.
+
+        Выбор сохраняется только для заметки, оставшейся в результатах.
+        Фильтрация не изменяет записи и их привязки к страницам курса.
+        """
         selected = self.notes_list.currentItem()
         selected_key = selected.data(Qt.ItemDataRole.UserRole) if selected else None
         selected_key = tuple(selected_key) if selected_key else None
         self.notes_list.clear()
+        query = self.notes_search.text().strip().casefold()
+        self.notes_hint.setText('Ничего не найдено' if query else
+                                'Заметок пока нет. Добавьте первую заметку к открытой странице.')
         count = 0
         if self.root:
             groups = self.store.course(self.root)['notes']
             for relative in sorted(groups, key=natural_key):
-                notes = groups[relative]
+                count += len(groups[relative])
+                notes = [note for note in groups[relative] if query in note['text'].casefold()]
                 if not notes:
                     continue
                 heading = QListWidgetItem(f'{relative} ({len(notes)})')
@@ -769,7 +785,6 @@ class Window(QMainWindow):
                     self.notes_list.addItem(item)
                     if key == selected_key:
                         self.notes_list.setCurrentItem(item)
-                    count += 1
         self.notes_action.setText(f'Заметки ({count})')
         self.update_note_actions()
 
