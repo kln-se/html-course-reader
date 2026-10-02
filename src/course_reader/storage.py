@@ -139,6 +139,19 @@ class Store:
         self.course(root)
         self.data['active_course'] = str(root.resolve())
 
+    def remove_course(self, key: str) -> bool:
+        """Удалить известную запись по ключу истории, не обращаясь к файлам курса.
+
+        Сбросить активный курс только при совпадении ключа. Вернуть False,
+        если записи уже нет. Для записи результата на диск вызвать save().
+        """
+        if key not in self.data['courses']:
+            return False
+        del self.data['courses'][key]
+        if self.data.get('active_course') == key:
+            self.data.pop('active_course', None)
+        return True
+
     def relocate(self, old: str, new: Path) -> None:
         """Перенести запись old на новый абсолютный корень, сохранив относительные пути.
 

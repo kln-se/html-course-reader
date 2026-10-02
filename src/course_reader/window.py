@@ -1,5 +1,6 @@
 """Интерфейс чтения, выбора курсов и работы с заметками."""
 from datetime import datetime, timezone
+from copy import deepcopy
 from pathlib import Path
 import subprocess
 from shiboken6 import delete
@@ -14,7 +15,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
 from .viewer import Page, OfflineInterceptor
 from .storage import Store
-from .theme import style_checkbox, TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
+from .theme import DockTitleStyle, style_checkbox, TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
 
 
 def format_note_time(value: str) -> str:
@@ -334,7 +335,7 @@ class Window(QMainWindow):
             self.choose_course()
 
     def choose_course(self):
-        """Показать модальный выбор курса с добавлением папки и заменой корневого пути."""
+        """Показать выбор курса с добавлением, заменой пути и удалением из истории."""
         dialog = QDialog(self)
         dialog.setWindowTitle('Выберите курс')
         dialog.resize(600, 350)
@@ -383,12 +384,92 @@ class Window(QMainWindow):
                 self.persist()
                 self.set_course(Path(selected))
                 dialog.accept()
+        def remove():
+            """Удалить выбранную строку только после подтверждения и сохранения истории."""
+            item = listing.currentItem()
+            if item is not None and self.remove_course(item.text()):
+                listing.takeItem(listing.row(item))
+                remove_button.setEnabled(listing.currentItem() is not None)
+
         listing.itemDoubleClicked.connect(select)
         for label, callback in [('Открыть', select), ('Добавить папку', add), ('Указать новое расположение', relocate)]:
             button = QPushButton(label)
             button.clicked.connect(callback)
             layout.addWidget(button)
+        remove_button = QPushButton('Удалить из списка')
+        remove_button.setEnabled(listing.currentItem() is not None)
+        remove_button.clicked.connect(remove)
+        listing.currentItemChanged.connect(
+            lambda current, previous: remove_button.setEnabled(current is not None))
+        layout.addWidget(remove_button)
         dialog.exec()
+
+    def confirm_course_removal(self, key: str) -> bool:
+        """Запросить удаление данных курса с отменой по умолчанию и по Escape."""
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Удаление курса из списка')
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(
+            f'Удалить курс «{Path(key).name or key}» из списка?\n{key}\n\n'
+            'История чтения, избранное и заметки этого курса будут удалены.\n'
+            'Папка и файлы курса останутся на диске.')
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        remove = dialog.addButton('Удалить', QMessageBox.ButtonRole.DestructiveRole)
+        cancel = dialog.addButton('Отмена', QMessageBox.ButtonRole.RejectRole)
+        dialog.setDefaultButton(cancel)
+        dialog.setEscapeButton(cancel)
+        try:
+            dialog.exec()
+            return dialog.clickedButton() is remove
+        finally:
+            dialog.deleteLater()
+
+    def remove_course(self, key: str) -> bool:
+        """Подтвердить и сохранить удаление записи; при ошибке вернуть состояние.
+
+        Чтение другого курса продолжается. При удалении открытого курса
+        очистить просмотрщик и панели, остановив отложенное обновление.
+        Файлы материалов не удаляются и не изменяются.
+        """
+        if key not in self.store.data['courses'] or not self.confirm_course_removal(key):
+            return False
+        previous = deepcopy(self.store.data)
+        if not self.store.remove_course(key):
+            return False
+        try:
+            self.store.save()
+        except OSError as error:
+            self.store.data = previous
+            QMessageBox.warning(self, 'Не удалось удалить курс из списка', str(error))
+            return False
+        if self.root is not None and str(self.root) == key:
+            self.clear_course()
+        return True
+
+    def clear_course(self) -> None:
+        """Очистить текущий курс и обезвредить callbacks, не создавая запись истории."""
+        self.navigation_generation += 1
+        self.loading = True
+        self.restore_position = False
+        self.root = None
+        self.current = None
+        self.page.pending_restore = None
+        self.save_timer.stop()
+        self.catalog_timer.stop()
+        self.catalog_fallback.stop()
+        watched = self.catalog_watcher.directories()
+        if watched:
+            self.catalog_watcher.removePaths(watched)
+        self.view.stop()
+        self.rebuild([])
+        self.tree_search.clear()
+        self.tree_search.hide()
+        self.notes_search.clear()
+        self.hide_find()
+        self.notes_dock.hide()
+        self.refresh_metadata()
+        self.statusBar().clearMessage()
+        self.view.setUrl(QUrl('about:blank'))
 
     def set_course(self, root):
         """Сделать курс активным, сохранить выбор и открыть существующий последний файл.
@@ -1000,6 +1081,11 @@ class Window(QMainWindow):
         """Применить светлую или графитовую палитру к виджетам, не меняя HTML страницы."""
         name = self.store.settings['app']['theme']
         self.setStyleSheet(stylesheet(name))
+        previous_style = getattr(self, '_notes_title_style', None)
+        self._notes_title_style = DockTitleStyle(name, self.notes_dock)
+        self.notes_dock.setStyle(self._notes_title_style)
+        if previous_style is not None:
+            previous_style.deleteLater()
         for action, icon_name in self.icon_actions:
             action.setIcon(icon(icon_name, name))
         for listing in (self.tree, self.favorites, self.notes_list):

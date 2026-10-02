@@ -2,7 +2,7 @@
 from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt, QPointF
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap, QFontMetrics, QPalette, QTextLayout, QTextCharFormat
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QCheckBox, QStyleFactory, QLabel, QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PySide6.QtWidgets import QProxyStyle, QCheckBox, QStyleFactory, QLabel, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 PALETTES = {
     'dark': dict(bg='#20242B', panel='#282D36', text='#E6E9EF', muted='#AFB9C9',
@@ -24,6 +24,7 @@ PATHS = {
     'collapse': '<path d="m4 6 6 6-6 6M20 6l-6 6 6 6"/>',
     'locate': '<circle cx="12" cy="12" r="7"/><path d="M12 2v20M2 12h20"/>',
     'expand': '<path d="m10 6-6 6 6 6M14 6l6 6-6 6"/>',
+    'undock': '<path d="M8 4h12v12H8zM4 8v12h12"/>',
     'close': '<path d="m6 6 12 12M18 6 6 18"/>',
 }
 
@@ -84,6 +85,25 @@ def icon(name: str, theme: str) -> QIcon:
                 pixmap.setDevicePixelRatio(scale)
                 result.addPixmap(pixmap, mode, state)
     return result
+
+
+class DockTitleStyle(QProxyStyle):
+    """Подставлять тематические значки штатных кнопок заголовка панели."""
+
+    def __init__(self, theme: str, parent):
+        """Создать отдельный базовый стиль, принадлежащий панели."""
+        super().__init__('Fusion')
+        self.theme = theme
+        self.setParent(parent)
+
+    def standardIcon(self, standard_icon, option=None, widget=None):
+        """Заменить значки закрытия и отделения, сохранив остальные значки Qt."""
+        if standard_icon in (QStyle.StandardPixmap.SP_TitleBarCloseButton,
+                             QStyle.StandardPixmap.SP_DockWidgetCloseButton):
+            return icon('close', self.theme)
+        if standard_icon == QStyle.StandardPixmap.SP_TitleBarNormalButton:
+            return icon('undock', self.theme)
+        return super().standardIcon(standard_icon, option, widget)
 
 
 class RowDelegate(QStyledItemDelegate):
