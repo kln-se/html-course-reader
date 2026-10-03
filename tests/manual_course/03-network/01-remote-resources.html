@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Проверка ресурсов из интернета</title>
+<link id="remote-style" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.1.1/css/pico.min.css" onload="this.dataset.result='loaded'" onerror="this.dataset.result='error'">
+<style>
+@font-face {
+  font-family: NetworkMono;
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('https://fonts.gstatic.com/s/robotomono/v31/L0xuDF4xlVMF-BfR8bXMIhJHg45mwgGEFl0_3vqPQw.ttf') format('truetype');
+}
+body { margin: 24px auto; padding: 0 20px; max-width: 960px; background: #fff; color: #243246; }
+.instructions, .status, .description { font: 16px/1.6 Arial, sans-serif; }
+.status { padding: 8px 12px; border: 1px solid #8090a0; border-radius: 6px; }
+.font-example { font-family: NetworkMono, serif; font-size: 26px; overflow-wrap: anywhere; }
+.reference { font-family: serif; font-size: 26px; overflow-wrap: anywhere; }
+section { margin: 32px 0; }
+#remote-image { display: block; max-width: 100%; height: auto; margin: 16px 0; }
+</style>
+</head>
+<body>
+<h1>Изображения, стили и шрифты из интернета</h1>
+<div class="instructions">
+<p>Это локальная тестовая страница. Внешние ресурсы запрашиваются с <b>www.google.com</b>, <b>fonts.gstatic.com</b> и <b>cdn.jsdelivr.net</b>. Пароли и данные курса не используются. Внешних скриптов здесь нет; индикаторы работают на небольшом встроенном скрипте.</p>
+<ol>
+<li>В настройках выберите «Не загружать», примените и заново откройте страницу.</li>
+<li>Затем включайте по одному типу: «Изображения», «Стили», «Шрифты».</li>
+<li>После каждого изменения примените настройки и заново откройте страницу. Для строгой проверки каждого режима перезапускайте приложение: ранее загруженные ресурсы могут оставаться в памяти или кеше.</li>
+<li>Наконец разрешите все три типа: все индикаторы должны сообщить об успешной загрузке при доступной сети.</li>
+</ol>
+<p>Ошибка сама по себе не доказывает работу фильтра: возможны проблемы интернета, сертификатов или доступности сервиса. Успешная загрузка из кеша также не доказывает новый сетевой запрос.</p>
+</div>
+<section>
+<h2>1. Изображение — Google</h2>
+<p class="description">При разрешённых изображениях появится цветной логотип. Настройки стилей и шрифтов на его загрузку не влияют.</p>
+<p class="status" id="image-status" role="status">Изображение: ожидание…</p>
+<img id="remote-image" src="https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png" width="272" height="92" alt="Внешний логотип Google — не загружен">
+</section>
+<section>
+<h2>2. Внешний стиль — Pico CSS 2.1.1</h2>
+<p class="description">При разрешённых стилях кнопка ниже станет крупной и цветной, а заголовки и интервалы изменятся. Кнопка демонстрационная, никаких действий не выполняет.</p>
+<p class="status" id="style-status" role="status">Стиль: ожидание…</p>
+<button type="button">Пример оформления внешним CSS</button>
+</section>
+<section>
+<h2>3. Шрифт — Roboto Mono от Google Fonts</h2>
+<p class="description">Шрифт объявлен в локальном CSS этой страницы и загружается напрямую. Для него достаточно разрешить только «Шрифты», внешний CSS не требуется. При блокировке первая строка выглядит как вторая.</p>
+<p class="status" id="font-status" role="status">Шрифт: ожидание…</p>
+<p class="font-example">Roboto Mono: WWW iii 0123456789 — Пример текста</p>
+<p class="reference">Roboto Mono: WWW iii 0123456789 — Пример текста</p>
+</section>
+<script>
+(() => {
+  const show = (id, label, ok) => {
+    document.getElementById(id).textContent = label + (ok
+      ? ': загружено ✓'
+      : ': заблокировано или недоступно');
+  };
+  const img = document.getElementById('remote-image');
+  img.addEventListener('load', () => show('image-status', 'Изображение', true));
+  img.addEventListener('error', () => show('image-status', 'Изображение', false));
+  if (img.complete) show('image-status', 'Изображение', img.naturalWidth > 0);
+  const css = document.getElementById('remote-style');
+  css.addEventListener('load', () => show('style-status', 'Стиль', true));
+  css.addEventListener('error', () => show('style-status', 'Стиль', false));
+  if (css.dataset.result) show('style-status', 'Стиль', css.dataset.result === 'loaded');
+  else if (css.sheet) show('style-status', 'Стиль', true);
+  document.fonts.load('26px NetworkMono').then(
+    fonts => show('font-status', 'Шрифт', fonts.length > 0 && fonts.every(font => font.status === 'loaded')),
+    () => show('font-status', 'Шрифт', false)
+  );
+})();
+</script>
+</body>
+</html>

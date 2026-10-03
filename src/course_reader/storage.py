@@ -33,6 +33,11 @@ class Store:
             with settings_path.open(encoding='utf-8') as stream:
                 self.settings.read_file(stream)
         self._initialize_file_groups()
+        if not self.settings.has_section('remote_resources'):
+            self.settings.add_section('remote_resources')
+        for key, default in {'enabled': 'false', 'images': 'true', 'styles': 'true', 'fonts': 'true'}.items():
+            if key not in self.settings['remote_resources']:
+                self.settings['remote_resources'][key] = default
         history_path = directory / 'history.json'
         self.data = json.loads(history_path.read_text(encoding='utf-8')) if history_path.exists() else {'courses': {}}
         if not isinstance(self.data, dict) or not isinstance(self.data.get('courses'), dict):
@@ -74,6 +79,8 @@ class Store:
         """Проверить настройки и структуру истории; отклонить некорректные значения через ValueError."""
         try:
             self.settings.getboolean('app', 'internet_links')
+            for key in ('enabled', 'images', 'styles', 'fonts'):
+                self.settings.getboolean('remote_resources', key)
             for group in FORMAT_GROUPS:
                 self.settings.getboolean('files.' + group, 'enabled')
             zoom = self.settings.getfloat('app', 'zoom')

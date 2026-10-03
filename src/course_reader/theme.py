@@ -2,7 +2,7 @@
 from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt, QPointF
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap, QFontMetrics, QPalette, QTextLayout, QTextCharFormat
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QProxyStyle, QCheckBox, QStyleFactory, QLabel, QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PySide6.QtWidgets import QProxyStyle, QRadioButton, QCheckBox, QStyleFactory, QLabel, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 PALETTES = {
     'dark': dict(bg='#20242B', panel='#282D36', text='#E6E9EF', muted='#AFB9C9',
@@ -24,12 +24,13 @@ PATHS = {
     'collapse': '<path d="m4 6 6 6-6 6M20 6l-6 6 6 6"/>',
     'locate': '<circle cx="12" cy="12" r="7"/><path d="M12 2v20M2 12h20"/>',
     'expand': '<path d="m10 6-6 6 6 6M14 6l6 6-6 6"/>',
+    'warning': '<path d="m12 3 10 18H2zM12 9v5M12 17v1"/>',
     'undock': '<path d="M8 4h12v12H8zM4 8v12h12"/>',
     'close': '<path d="m6 6 12 12M18 6 6 18"/>',
 }
 
 
-def style_checkbox(checkbox: QCheckBox, theme: str) -> None:
+def style_checkbox(checkbox: QCheckBox | QRadioButton, theme: str) -> None:
     """Оформить индикатор по теме приложения независимо от темы Windows.
 
     Отдельный стиль Fusion принадлежит чекбоксу и уничтожается вместе с ним.
@@ -256,7 +257,9 @@ def stylesheet(theme: str) -> str:
     QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{ border-color: {c['accent']}; }}
     QLineEdit QToolButton {{ padding: 0; min-height: 0; min-width: 0; border: none; border-radius: 0; }}
     QComboBox QAbstractItemView {{ background: {c['panel']}; color: {c['text']}; selection-background-color: {c['selected']}; selection-color: {c['text']}; }}
-    QCheckBox {{ spacing: 8px; padding: 4px; }}
+    QCheckBox, QRadioButton {{ spacing: 8px; padding: 4px; }}
+    QGroupBox {{ border: 1px solid {c['border']}; border-radius: 6px; margin-top: 12px; padding: 12px; }}
+    QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
     QTabWidget::pane {{ border: none; }}
     QTabBar::tab {{ background: {c['bg']}; color: {c['muted']}; padding: 10px 14px; border-bottom: 2px solid transparent; }}
     QTabBar::tab:selected {{ color: {c['text']}; font-weight: 600; border-bottom-color: {c['accent']}; }}

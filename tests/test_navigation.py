@@ -223,7 +223,7 @@ def test_new_window_request_routes_to_existing_view_or_confirmation(page_policy,
 def test_resource_interceptor_blocks_network_schemes(address, blocked):
     calls = []
     info = SimpleNamespace(requestUrl=lambda: QUrl(address), block=calls.append)
-    OfflineInterceptor.interceptRequest(SimpleNamespace(), info)
+    OfflineInterceptor.interceptRequest(SimpleNamespace(allowed_types=frozenset()), info)
     assert calls == ([True] if blocked else [])
 
 

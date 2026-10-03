@@ -10,11 +10,12 @@ from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListW
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
     QPushButton, QInputDialog, QDockWidget, QWidget, QLineEdit, QCheckBox, QComboBox,
     QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem, QHBoxLayout, QToolButton, QApplication)
-from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
 from .viewer import Page, OfflineInterceptor
 from .storage import Store
+from .remote_settings import RemoteResourcesSettings
 from .theme import DockTitleStyle, style_checkbox, TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
 
 
@@ -40,8 +41,10 @@ class Window(QMainWindow):
     """Связывать каталог, просмотрщик и состояние выбранного курса в главном окне."""
     def __init__(self, store: Store):
         """Создать панели, обработчики и профиль WebEngine, применить настройки переданного Store."""
+        # Задать шрифт до создания окна: иначе оно наследует прежний шрифт Qt.
+        # При повторном применении QSS используется шрифт приложения.
+        QApplication.setFont(interface_font())
         super().__init__()
-        self.setFont(interface_font())
         self.icon_actions = []
         self.store = store
         self.root = None
@@ -141,6 +144,7 @@ class Window(QMainWindow):
         self.profile.setUrlRequestInterceptor(self.interceptor)
         self.page = Page(self.profile, self.view)
         self.view.setPage(self.page)
+        self.apply_remote_resources()
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self.page_context_menu)
         self.page.allow_local = self.allow_local
@@ -1027,6 +1031,19 @@ class Window(QMainWindow):
         self.store.settings['app']['zoom'] = str(factor)
         self.persist()
 
+    def apply_remote_resources(self) -> None:
+        """Применить выбор ресурсов одновременно к фильтру запросов и WebEngine.
+
+        Действует для последующих запросов; уже загруженное содержимое остаётся.
+        Открытие интернет-ссылок в браузере управляется отдельной настройкой.
+        """
+        values = self.store.settings['remote_resources']
+        flags = {key: values.getboolean(key) for key in ('enabled', 'images', 'styles', 'fonts')}
+        self.interceptor.configure(**flags)
+        self.page.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls,
+            flags['enabled'] and any(flags[key] for key in ('images', 'styles', 'fonts')))
+
     def settings_dialog(self):
         """Показать настройки; после подтверждения сохранить маски, интернет-переходы и тему."""
         dialog = QDialog(self)
@@ -1061,7 +1078,9 @@ class Window(QMainWindow):
         theme.setCurrentIndex(1 if self.store.settings['app']['theme'] == 'light' else 0)
         layout.addRow('Переход по интернет-ссылкам', internet)
         layout.addRow('Тема интерфейса', theme)
-        layout.addRow(QLabel('ℹ️ <b>Сетевые запросы самих страниц заблокированы.</b>', textFormat=Qt.TextFormat.RichText))
+        resources = RemoteResourcesSettings(self.store.settings['remote_resources'],
+                                             self.store.settings['app']['theme'], dialog)
+        layout.addRow(resources)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText('Применить')
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('Отмена')
@@ -1073,6 +1092,8 @@ class Window(QMainWindow):
                 self.store.settings['files.' + group].update(
                     {'enabled': str(enabled.isChecked()).lower(), 'patterns': masks.text()})
             self.store.settings['app'].update({'internet_links': str(internet.isChecked()).lower(), 'theme': theme.currentData()})
+            self.store.settings['remote_resources'].update(resources.values())
+            self.apply_remote_resources()
             self.persist()
             self.apply_theme()
             self.rebuild()

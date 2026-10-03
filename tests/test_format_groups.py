@@ -127,7 +127,7 @@ def test_migration_saves_new_sections_and_removes_legacy_key(tmp_path):
     store.save()
     saved = configparser.ConfigParser(interpolation=None)
     saved.read(tmp_path / 'settings.ini', encoding='utf-8')
-    assert set(saved.sections()) == {'app', 'files.pages', 'files.video', 'files.other'}
+    assert set(saved.sections()) == {'app', 'files.pages', 'files.video', 'files.other', 'remote_resources'}
     assert not saved.has_option('app', 'visible_patterns')
     assert Store(tmp_path).patterns == ['*.MP4', 'custom*.bin']
 

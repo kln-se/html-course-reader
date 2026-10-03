@@ -1,6 +1,6 @@
 """Просмотр локальных страниц и ограничения переходов через Qt WebEngine."""
 from PySide6.QtCore import Signal
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineUrlRequestInterceptor, QWebEngineSettings
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineUrlRequestInterceptor, QWebEngineSettings, QWebEngineUrlRequestInfo
 from .catalog import link_kind
 
 
@@ -8,10 +8,34 @@ class OfflineInterceptor(QWebEngineUrlRequestInterceptor):
     """Ограничивать схемы запросов WebEngine для локального чтения.
 
     Это фильтр запросов, а не гарантия полной изоляции недоверенной страницы."""
+    def __init__(self, parent=None):
+        """Начать с полной блокировки сетевых ресурсов."""
+        super().__init__(parent)
+        self.allowed_types = frozenset()
+
+    def configure(self, *, enabled: bool, images: bool, styles: bool, fonts: bool) -> None:
+        """Заменить неизменяемый набор разрешений для последующих запросов."""
+        types = QWebEngineUrlRequestInfo.ResourceType
+        self.allowed_types = frozenset(kind for selected, kind in (
+            (images, types.ResourceTypeImage),
+            (styles, types.ResourceTypeStylesheet),
+            (fonts, types.ResourceTypeFontResource),
+        ) if enabled and selected)
+
     def interceptRequest(self, info):
-        """Блокировать запросы со схемами вне file, data, blob, qrc и about."""
-        if info.requestUrl().scheme().lower() not in ('file', 'data', 'blob', 'qrc', 'about'):
-            info.block(True)
+        """Разрешить локальные схемы и выбранные типы HTTP/HTTPS GET-запросов.
+
+        Тип определяет WebEngine, а не расширение URL. Другие сетевые запросы,
+        включая документы, скрипты, XHR и видео, блокируются.
+        """
+        scheme = info.requestUrl().scheme().lower()
+        if scheme in ('file', 'data', 'blob', 'qrc', 'about'):
+            return
+        allowed = self.allowed_types
+        if (scheme in ('http', 'https') and allowed
+                and info.resourceType() in allowed and bytes(info.requestMethod()) == b'GET'):
+            return
+        info.block(True)
 
 
 class Page(QWebEnginePage):
