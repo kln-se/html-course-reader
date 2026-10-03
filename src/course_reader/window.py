@@ -1110,6 +1110,7 @@ class Window(QMainWindow):
         for action, icon_name in self.icon_actions:
             action.setIcon(icon(icon_name, name))
         for listing in (self.tree, self.favorites, self.notes_list):
+            listing.setProperty('theme', name)
             listing.setProperty('focusColor', PALETTES[name]['accent'])
             listing.viewport().update()
 

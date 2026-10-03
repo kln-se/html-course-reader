@@ -1,6 +1,6 @@
 """Единая типографика, палитры и векторные пиктограммы интерфейса читалки."""
-from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt, QPointF
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap, QFontMetrics, QPalette, QTextLayout, QTextCharFormat
+from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap, QFontMetrics, QPalette
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QProxyStyle, QRadioButton, QCheckBox, QStyleFactory, QLabel, QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
@@ -130,8 +130,28 @@ TREE_PREFIX_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 TREE_FOLDER_ROLE = int(Qt.ItemDataRole.UserRole) + 2
 
 
+def badge_rectangles(area: QRect, width: int, height: int) -> tuple[QRect, QRect]:
+    """Оставить метке полную ширину, передав имени остаток без отрицательных размеров."""
+    badge = QRect(area.left(), area.top() + (area.height() - height) // 2, width, height)
+    name = QRect(area.left() + width + 8, area.top(),
+                 max(0, area.width() - width - 8), max(0, area.height()))
+    return badge, name
+
+
 class TreeRowDelegate(RowDelegate):
-    """Выделять папки Bold, префиксы Semibold, сохраняя обычное начертание имён файлов."""
+    """Рисовать метки форматов рядом с именами файлов, выделяя папки Bold."""
+
+    @staticmethod
+    def badge_style(font: QFont, prefix: str) -> tuple[QFont, str, QSize]:
+        """Рассчитать полную ширину формата без сокращения текста метки."""
+        badge_font = QFont(font)
+        badge_font.setWeight(QFont.Weight.DemiBold)
+        if badge_font.pointSizeF() > 0:
+            badge_font.setPointSizeF(max(8.0, badge_font.pointSizeF() - 1.5))
+        metrics = QFontMetrics(badge_font)
+        label = prefix.removeprefix('[.').removesuffix(']').upper()
+        width = metrics.horizontalAdvance(label) + 12
+        return badge_font, label, QSize(width, metrics.height() + 6)
 
     def initStyleOption(self, option, index):
         """Применить начертание строки; служебные роли не меняют путь и доступное имя."""
@@ -140,20 +160,20 @@ class TreeRowDelegate(RowDelegate):
         option.fontMetrics = QFontMetrics(option.font)
 
     def sizeHint(self, option, index):
-        """Учесть дополнительную ширину полужирного префикса при расчёте строки."""
+        """Учесть ширину метки с отступами и достаточную высоту строки."""
         size = super().sizeHint(option, index)
         prefix = index.data(TREE_PREFIX_ROLE)
         if prefix:
             styled = QStyleOptionViewItem(option)
             self.initStyleOption(styled, index)
-            prefix_font = QFont(styled.font)
-            prefix_font.setWeight(QFont.Weight.DemiBold)
-            extra = QFontMetrics(prefix_font).horizontalAdvance(prefix) - styled.fontMetrics.horizontalAdvance(prefix)
-            size.setWidth(size.width() + max(0, extra))
+            _, _, badge_size = self.badge_style(styled.font, prefix)
+            extra = badge_size.width() + 8 - styled.fontMetrics.horizontalAdvance(prefix + ' ')
+            size.setWidth(max(0, size.width() + extra))
+            size.setHeight(max(size.height(), badge_size.height() + 8))
         return size
 
     def paint(self, painter, option, index):
-        """Рисовать фон штатным стилем, а префикс и сокращённое имя — разными начертаниями."""
+        """Сохранить штатное выделение и нарисовать метку с сокращённым именем."""
         prefix = index.data(TREE_PREFIX_ROLE)
         if not prefix:
             super().paint(painter, option, index)
@@ -164,33 +184,32 @@ class TreeRowDelegate(RowDelegate):
         text_rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, styled, styled.widget)
         focused = bool(styled.state & QStyle.StateFlag.State_HasFocus)
         styled.state &= ~QStyle.StateFlag.State_HasFocus
-        prefix_font = QFont(styled.font)
-        prefix_font.setWeight(QFont.Weight.DemiBold)
-        prefix_width = QFontMetrics(prefix_font).horizontalAdvance(prefix + ' ')
+        badge_font, label, badge_size = self.badge_style(styled.font, prefix)
+        badge_rect, name_rect = badge_rectangles(text_rect, badge_size.width(), badge_size.height())
         name = styled.text[len(prefix) + 1:]
         name = styled.fontMetrics.elidedText(name, Qt.TextElideMode.ElideMiddle,
-                                           max(0, text_rect.width() - prefix_width))
-        text = prefix + ' ' + name
+                                           max(0, name_rect.width()))
         styled.text = ''
         painter.save()
         try:
             style.drawControl(QStyle.ControlElement.CE_ItemViewItem, styled, painter, styled.widget)
-            painter.setClipRect(text_rect)
+            painter.setClipRect(text_rect, Qt.ClipOperation.IntersectClip)
             group = QPalette.ColorGroup.Normal if styled.state & QStyle.StateFlag.State_Enabled else QPalette.ColorGroup.Disabled
             role = QPalette.ColorRole.HighlightedText if styled.state & QStyle.StateFlag.State_Selected else QPalette.ColorRole.Text
+            if not badge_rect.isEmpty():
+                colors = PALETTES.get(styled.widget.property('theme'), PALETTES['dark'])
+                selected = bool(styled.state & QStyle.StateFlag.State_Selected)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(colors['panel'] if selected else colors['hover']))
+                painter.drawRoundedRect(badge_rect, 4, 4)
+                painter.setFont(badge_font)
+                painter.setPen(QColor(colors['text'] if styled.state & QStyle.StateFlag.State_Enabled else colors['muted']))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, label)
+            painter.setFont(styled.font)
             painter.setPen(styled.palette.color(group, role))
-            layout = QTextLayout(text, styled.font)
-            emphasis = QTextLayout.FormatRange()
-            emphasis.start = 0
-            emphasis.length = len(prefix)
-            emphasis.format = QTextCharFormat()
-            emphasis.format.setFontWeight(QFont.Weight.DemiBold)
-            layout.setFormats([emphasis])
-            layout.beginLayout()
-            line = layout.createLine()
-            line.setLineWidth(max(1, text_rect.width()))
-            layout.endLayout()
-            layout.draw(painter, QPointF(text_rect.left(), text_rect.top() + (text_rect.height() - line.height()) / 2))
+            if not name_rect.isEmpty():
+                painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, name)
         finally:
             painter.restore()
         if focused:
