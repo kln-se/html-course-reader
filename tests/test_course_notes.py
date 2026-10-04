@@ -6,7 +6,8 @@ from unittest.mock import Mock
 
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QInputDialog, QMessageBox
+from PySide6.QtGui import QTextOption
+from PySide6.QtWidgets import QDialog, QInputDialog, QMessageBox, QPlainTextEdit
 
 from src.course_reader.storage import Store
 from src.course_reader.window import Window
@@ -20,6 +21,16 @@ class NoteItem:
         self.values = {}
         self.item_flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         self.font_value = Mock()
+        self.hidden = False
+
+    def setHidden(self, value):
+        self.hidden = value
+
+    def isHidden(self):
+        return self.hidden
+
+    def setIcon(self, value):
+        self.icon = value
 
     def setData(self, role, value):
         self.values[role] = value
@@ -86,14 +97,17 @@ def reader(tmp_path, monkeypatch):
         notes_list=NotesList(), notes_action=Mock(), persist=Mock(),
         notes_search=Mock(text=Mock(return_value='')), notes_hint=Mock(),
         note_target=Mock(), notes_dock=Mock(),
+        collapsed_note_groups=set(), note_groups={},
         confirm_note_deletion=Mock(return_value=True),
         note_buttons={label: Mock() for label in
                       ('Добавить', 'Открыть страницу', 'Изменить', 'Удалить')},
         page=SimpleNamespace(open_saved=Mock()),
     )
-    for name in ('refresh_notes', 'selected_note', 'update_note_actions', 'open_file'):
+    for name in ('refresh_notes', 'selected_note', 'update_note_actions', 'open_file',
+                 'update_note_group_icons', 'toggle_note_group'):
         setattr(state, name, getattr(Window, name).__get__(state))
     monkeypatch.setattr('src.course_reader.window.QListWidgetItem', NoteItem)
+    monkeypatch.setattr('src.course_reader.window.icon', lambda name, theme: (name, theme))
     state.dialog = Mock(return_value=('new text', True))
     state.warning = Mock()
     state.note_text_dialog = state.dialog
@@ -116,7 +130,7 @@ def test_refresh_groups_all_pages_in_natural_order_and_counts_notes(reader):
     reader.refresh_notes()
     headings = [item for item in reader.notes_list.items if not item.data(Qt.ItemDataRole.UserRole)]
     assert [item.text for item in headings] == ['2.html (2)', '10.html (1)']
-    assert all(item.flags() == Qt.ItemFlag.NoItemFlags for item in headings)
+    assert all(item.flags() == Qt.ItemFlag.ItemIsEnabled for item in headings)
     reader.notes_action.setText.assert_called_with('Заметки (3)')
     reader.current = reader.root / 'unrelated.html'
     reader.refresh_notes()
@@ -289,7 +303,7 @@ def test_target_label_follows_current_page_not_selected_note(reader):
         reader.current = reader.root / relative
         reader.update_note_actions()
         expected = f'Открытая страница: {relative}'
-        reader.note_target.setText.assert_called_with(expected)
+        reader.note_target.setText.assert_called_with(f'<b>Открытая страница:</b> {relative}')
         reader.note_target.setToolTip.assert_called_with(expected)
         assert reader.selected_note() == ('2.html', note)
     reader.current = None
@@ -318,7 +332,8 @@ def test_show_notes_clears_old_selection_and_focus_on_reopen(reader, has_current
     for label in ('Открыть страницу', 'Изменить', 'Удалить'):
         reader.note_buttons[label].setEnabled.assert_called_with(False)
     reader.note_buttons['Добавить'].setEnabled.assert_called_with(has_current_page)
-    assert reader.note_buttons['Добавить'].setFocus.call_count == int(has_current_page)
+    for button in reader.note_buttons.values():
+        button.setFocus.assert_not_called()
     assert reader.store.course(reader.root)['notes']['2.html'] == [note]
 
 
@@ -355,15 +370,27 @@ def test_confirm_deletion_uses_russian_buttons_and_defaults_to_cancel(reader, mo
 def test_note_text_dialog_uses_russian_buttons_and_returns_acceptance(monkeypatch, editing, result):
     """Given: создание или правка заметки. When: диалог закрыт. Then: русские кнопки и верный результат."""
     parent = object()
+    initial_text = 'Первая строка\n<b>Обычный текст</b> & "цитата"'
     dialog = Mock()
     dialog.exec.return_value = result
+    editor = Mock(spec=['setLineWrapMode', 'setWordWrapMode'])
+    dialog.findChild.return_value = editor
+
+    def check_editor_before_exec():
+        dialog.findChild.assert_called_once_with(QPlainTextEdit)
+        editor.setLineWrapMode.assert_called_once_with(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        editor.setWordWrapMode.assert_called_once_with(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        dialog.setTextValue.assert_called_once_with(initial_text)
+        return result
+
+    dialog.exec.side_effect = check_editor_before_exec
     dialog.textValue.return_value = 'Первая строка\nВторая строка'
     factory = Mock(return_value=dialog)
     factory.InputMode = QInputDialog.InputMode
     factory.InputDialogOption = QInputDialog.InputDialogOption
     monkeypatch.setattr('src.course_reader.window.QInputDialog', factory)
 
-    assert Window.note_text_dialog(parent, 'chapter/2.html', 'Исходный текст', editing=editing) == (
+    assert Window.note_text_dialog(parent, 'chapter/2.html', initial_text, editing=editing) == (
         'Первая строка\nВторая строка', result == QDialog.DialogCode.Accepted)
 
     factory.assert_called_once_with(parent)
@@ -371,7 +398,7 @@ def test_note_text_dialog_uses_russian_buttons_and_returns_acceptance(monkeypatc
     dialog.setInputMode.assert_called_once_with(QInputDialog.InputMode.TextInput)
     dialog.setOption.assert_called_once_with(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, True)
     dialog.setLabelText.assert_called_once_with('Страница: chapter/2.html\nТекст:')
-    dialog.setTextValue.assert_called_once_with('Исходный текст')
+    dialog.setTextValue.assert_called_once_with(initial_text)
     dialog.setOkButtonText.assert_called_once_with('Сохранить' if editing else 'Добавить')
     dialog.setCancelButtonText.assert_called_once_with('Отмена')
     dialog.exec.assert_called_once_with()

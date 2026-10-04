@@ -1,15 +1,17 @@
 """Интерфейс чтения, выбора курсов и работы с заметками."""
 from datetime import datetime, timezone
 from copy import deepcopy
+from html import escape
 from pathlib import Path
 import subprocess
 from shiboken6 import delete
 from PySide6.QtCore import Qt, QUrl, QTimer, QSize, Slot, QFileSystemWatcher, QDateTime, QLocale, QEvent
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QTextOption
 from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListWidget,
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
     QPushButton, QInputDialog, QDockWidget, QWidget, QLineEdit, QCheckBox, QComboBox,
-    QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem, QHBoxLayout, QToolButton, QApplication)
+    QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem, QHBoxLayout, QToolButton, QApplication,
+    QListView, QSizePolicy, QPlainTextEdit)
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
@@ -17,6 +19,8 @@ from .viewer import Page, OfflineInterceptor
 from .storage import Store
 from .remote_settings import RemoteResourcesSettings
 from .theme import DockTitleStyle, style_checkbox, TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
+
+NOTE_GROUP_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 
 
 def format_note_time(value: str) -> str:
@@ -57,6 +61,8 @@ class Window(QMainWindow):
         self.items = {}
         self.directory_items = {}
         self.tree_search_expanded = None
+        self.collapsed_note_groups: set[str] = set()
+        self.note_groups: dict[str, tuple[QListWidgetItem, list[QListWidgetItem]]] = {}
         self.setWindowTitle('Course Reader')
         self.resize(1200, 800)
         self.setMinimumSize(760, 520)
@@ -203,6 +209,7 @@ class Window(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
+        self.add_note_controls(layout)
         self.notes_search = QLineEdit()
         self.notes_search.setPlaceholderText('Найти заметку…')
         self.notes_search.setAccessibleName('Поиск по тексту заметок курса')
@@ -211,24 +218,20 @@ class Window(QMainWindow):
         layout.addWidget(self.notes_search)
         self.notes_list = QListWidget()
         self.notes_list.setWordWrap(True)
+        self.notes_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.notes_list.setResizeMode(QListView.ResizeMode.Adjust)
+        self.notes_list.setIconSize(QSize(16, 16))
         self.notes_list.setAccessibleName('Заметки всего курса')
         self.notes_list.currentItemChanged.connect(lambda current, previous: self.update_note_actions())
+        self.notes_list.itemClicked.connect(self.toggle_note_group)
         self.notes_list.itemDoubleClicked.connect(
             lambda item: self.open_note_page() if item.data(Qt.ItemDataRole.UserRole) else None)
-        self.note_buttons = {}
         layout.addWidget(self.notes_list)
         self.note_target = QLabel('Нет открытой страницы')
-        self.note_target.setTextFormat(Qt.TextFormat.PlainText)
+        self.note_target.setTextFormat(Qt.TextFormat.RichText)
         self.note_target.setWordWrap(True)
+        self.note_target.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.note_target)
-        for label, callback in [('Добавить', self.add_note), ('Открыть страницу', self.open_note_page), ('Изменить', self.edit_note), ('Удалить', self.delete_note)]:
-            button = QPushButton(label)
-            button.clicked.connect(callback)
-            button.setEnabled(False)
-            self.note_buttons[label] = button
-            if label == 'Добавить':
-                button.setText('Добавить к открытой странице')
-            layout.addWidget(button)
         self.notes_dock.setWidget(panel)
         self.notes_dock.setMinimumWidth(240)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.notes_dock)
@@ -256,6 +259,36 @@ class Window(QMainWindow):
         self.save_timer.setSingleShot(True)
         self.save_timer.timeout.connect(self.persist)
         QApplication.instance().installEventFilter(self)
+
+    def add_note_controls(self, layout: QVBoxLayout) -> None:
+        """Разместить компактные действия с подсказками над содержимым панели заметок."""
+        controls = QHBoxLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(4)
+        self.note_buttons = {}
+        actions = [
+            ('Добавить', 'Добавить к открытой странице', 'plus', self.add_note),
+            ('Открыть страницу', 'Открыть страницу', 'open_page', self.open_note_page),
+            ('Изменить', 'Изменить заметку', 'edit', self.edit_note),
+            ('Удалить', 'Удалить заметку', 'delete', self.delete_note),
+        ]
+        for key, label, icon_name, callback in actions:
+            button = QToolButton()
+            button.setObjectName('noteControl')
+            button.setFixedSize(30, 30)
+            button.setIconSize(QSize(20, 20))
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+            button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            button.setText(label)
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            button.clicked.connect(callback)
+            button.setEnabled(False)
+            self.note_buttons[key] = button
+            self.icon_actions.append((button, icon_name))
+            controls.addWidget(button)
+        controls.addStretch()
+        layout.addLayout(controls)
 
     def escape_target(self) -> str | None:
         """Выбрать одну панель для Esc; диалоги, меню и чужие окна имеют приоритет."""
@@ -458,6 +491,8 @@ class Window(QMainWindow):
         self.root = None
         self.current = None
         self.page.pending_restore = None
+        self.collapsed_note_groups = set()
+        self.note_groups = {}
         self.save_timer.stop()
         self.catalog_timer.stop()
         self.catalog_fallback.stop()
@@ -488,6 +523,8 @@ class Window(QMainWindow):
         self.tree_search.clear()
         self.tree_search.hide()
         self.root = root.resolve()
+        self.collapsed_note_groups = set()
+        self.note_groups = {}
         self.notes_search.clear()
         self.view.setUrl(QUrl('about:blank'))
         self.store.activate_course(self.root)
@@ -837,13 +874,14 @@ class Window(QMainWindow):
     def refresh_notes(self) -> None:
         """Показать совпавшие по тексту заметки, сохранив группировку и общий счётчик.
 
-        Выбор сохраняется только для заметки, оставшейся в результатах.
-        Фильтрация не изменяет записи и их привязки к страницам курса.
+        Выбор сохраняется только для видимой заметки. Поиск временно раскрывает
+        совпавшие группы, не меняя их запомненного состояния и записей курса.
         """
         selected = self.notes_list.currentItem()
         selected_key = selected.data(Qt.ItemDataRole.UserRole) if selected else None
         selected_key = tuple(selected_key) if selected_key else None
         self.notes_list.clear()
+        self.note_groups = {}
         query = self.notes_search.text().strip().casefold()
         self.notes_hint.setText('Ничего не найдено' if query else
                                 'Заметок пока нет. Добавьте первую заметку к открытой странице.')
@@ -856,37 +894,81 @@ class Window(QMainWindow):
                 if not notes:
                     continue
                 heading = QListWidgetItem(f'{relative} ({len(notes)})')
-                heading.setFlags(Qt.ItemFlag.NoItemFlags)
+                heading.setFlags(Qt.ItemFlag.ItemIsEnabled)
+                heading.setData(NOTE_GROUP_ROLE, (str(self.root), relative))
                 font = heading.font()
                 font.setBold(True)
                 heading.setFont(font)
                 heading.setToolTip(relative)
                 self.notes_list.addItem(heading)
+                collapsed = not query and relative in self.collapsed_note_groups
+                rows = []
                 for note in notes:
                     item = QListWidgetItem(note['text'] + '\nИзменено: ' + format_note_time(note['updated']))
                     key = (str(self.root), relative, note['id'])
                     item.setData(Qt.ItemDataRole.UserRole, key)
                     item.setToolTip(relative)
                     self.notes_list.addItem(item)
-                    if key == selected_key:
+                    item.setHidden(collapsed)
+                    rows.append(item)
+                    if key == selected_key and not collapsed:
                         self.notes_list.setCurrentItem(item)
+                self.note_groups[relative] = (heading, rows)
+        self.update_note_group_icons()
         self.notes_action.setText(f'Заметки ({count})')
+        self.update_note_actions()
+
+    def update_note_group_icons(self) -> None:
+        """Согласовать шевроны групп с темой и временным раскрытием при поиске."""
+        searching = bool(self.notes_search.text().strip())
+        theme = self.store.settings['app']['theme']
+        for relative, (heading, _) in self.note_groups.items():
+            collapsed = not searching and relative in self.collapsed_note_groups
+            heading.setIcon(icon('next' if collapsed else 'chevron_down', theme))
+            action = ('Результаты поиска раскрыты' if searching else
+                      'Развернуть заметки' if collapsed else 'Свернуть заметки')
+            heading.setToolTip(relative + '\n' + action)
+
+    def toggle_note_group(self, item: QListWidgetItem) -> None:
+        """Переключить группу текущего курса; поиск и клики по заметкам игнорируются."""
+        key = item.data(NOTE_GROUP_ROLE)
+        if (not self.root or not key or key[0] != str(self.root)
+                or self.notes_search.text().strip()):
+            return
+        relative = key[1]
+        group = self.note_groups.get(relative)
+        if group is None or group[0] is not item:
+            return
+        collapsed = relative not in self.collapsed_note_groups
+        if collapsed:
+            self.collapsed_note_groups.add(relative)
+            current = self.notes_list.currentItem()
+            selected = current.data(Qt.ItemDataRole.UserRole) if current else None
+            if selected and selected[1] == relative:
+                self.notes_list.clearSelection()
+                self.notes_list.setCurrentRow(-1)
+        else:
+            self.collapsed_note_groups.remove(relative)
+        for row in group[1]:
+            row.setHidden(collapsed)
+        self.update_note_group_icons()
         self.update_note_actions()
 
     def update_note_actions(self) -> None:
         """Разрешить добавление к открытой странице и действия с выбранной заметкой."""
         can_add = self.root is not None and self.current is not None
         self.note_buttons['Добавить'].setEnabled(can_add)
-        target = ('Открытая страница: ' + self.current.relative_to(self.root).as_posix()
-                  if can_add else 'Нет открытой страницы')
-        self.note_target.setText(target)
+        relative = self.current.relative_to(self.root).as_posix() if can_add else None
+        target = 'Открытая страница: ' + relative if can_add else 'Нет открытой страницы'
+        self.note_target.setText('<b>Открытая страница:</b> ' + escape(relative)
+                                 if can_add else target)
         self.note_target.setToolTip(target)
         selected = self.selected_note() is not None
         for label in ('Открыть страницу', 'Изменить', 'Удалить'):
             self.note_buttons[label].setEnabled(selected)
 
     def show_notes(self):
-        """Открыть панель без выбранной заметки либо скрыть уже открытую панель."""
+        """Открыть панель без выбора заметки и принудительного фокуса на кнопках либо скрыть её."""
         opening = not self.notes_dock.isVisible()
         self.notes_dock.setVisible(opening)
         if opening:
@@ -894,31 +976,47 @@ class Window(QMainWindow):
             self.notes_list.setCurrentRow(-1)
             self.notes_list.clearFocus()
             self.update_note_actions()
-            if self.current is not None:
-                self.note_buttons['Добавить'].setFocus()
 
     def note_text_dialog(self, relative: str, text: str = '', *, editing: bool = False) -> tuple[str, bool]:
-        """Запросить многострочную заметку с русскими кнопками и штатной отменой по Esc."""
+        """Запросить многострочную заметку с русскими кнопками и отменой по Esc.
+
+        Перенос по ширине поля, включая длинные слова и URL,
+        не изменяет сохраняемый текст.
+        """
         dialog = QInputDialog(self)
         dialog.setWindowTitle('Изменить заметку' if editing else 'Заметка')
         dialog.setInputMode(QInputDialog.InputMode.TextInput)
         dialog.setOption(QInputDialog.InputDialogOption.UsePlainTextEditForTextInput, True)
         dialog.setLabelText(f'Страница: {relative}\nТекст:')
         dialog.setTextValue(text)
+        editor = dialog.findChild(QPlainTextEdit)
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        editor.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         dialog.setOkButtonText('Сохранить' if editing else 'Добавить')
         dialog.setCancelButtonText('Отмена')
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         return dialog.textValue(), accepted
 
-    def add_note(self):
-        """Добавить заметку к открытой странице независимо от выделения в дереве."""
-        if not self.root or not self.current:
+    def add_note(self, *, initial_text: str = '', source: tuple[Path, Path] | None = None) -> None:
+        """Добавить заметку к указанной или открытой странице курса.
+
+        Успешное добавление раскрывает её группу, сохраняя поисковый запрос.
+        Отмена или пустой текст не меняют состояние групп.
+
+        Args:
+            initial_text: Обычный текст для предварительного заполнения редактора.
+            source: Зафиксированные корень курса и страница цитаты; при отсутствии
+                используется открытая страница. Смена курса отменяет сохранение.
+        """
+        root, page = source if source is not None else (self.root, self.current)
+        if root is None or page is None or root != self.root:
             return
-        root = self.root
-        relative = self.current.relative_to(root).as_posix()
-        text, ok = self.note_text_dialog(relative)
-        if ok and text.strip():
+        relative = page.relative_to(root).as_posix()
+        text, ok = (self.note_text_dialog(relative, initial_text) if initial_text
+                    else self.note_text_dialog(relative))
+        if ok and text.strip() and self.root == root:
             self.store.add_note(root, relative, text)
+            self.collapsed_note_groups.discard(relative)
             self.persist()
             self.refresh_notes()
 
@@ -983,7 +1081,12 @@ class Window(QMainWindow):
 
         Копирование и выделение выполняет WebEngine; переходы используют
         те же правила и сообщения о границах, что и кнопки панели.
+        Текст цитаты и её страница фиксируются до открытия меню.
+        Добавление заметки доступно для непустого выделения на странице курса.
         """
+        root, page = self.root, self.current
+        selected_text = self.page.selectedText()
+        can_add_note = root is not None and page is not None and bool(selected_text.strip())
         menu = QMenu(self)
         try:
             previous = menu.addAction('Предыдущая страница')
@@ -993,6 +1096,8 @@ class Window(QMainWindow):
             menu.addSeparator()
             copy = menu.addAction('Копировать')
             copy.setEnabled(self.page.hasSelection())
+            add_note = menu.addAction('Добавить в заметки')
+            add_note.setEnabled(can_add_note)
             select_all = menu.addAction('Выделить всё')
             select_all.setEnabled(self.current is not None)
             menu.addSeparator()
@@ -1005,6 +1110,8 @@ class Window(QMainWindow):
                 self.move(1)
             elif selected is copy:
                 self.page.triggerAction(QWebEnginePage.WebAction.Copy)
+            elif selected is add_note and can_add_note:
+                self.add_note(initial_text=selected_text, source=(root, page))
             elif selected is select_all:
                 self.page.triggerAction(QWebEnginePage.WebAction.SelectAll)
             elif selected is find:
@@ -1113,6 +1220,7 @@ class Window(QMainWindow):
             listing.setProperty('theme', name)
             listing.setProperty('focusColor', PALETTES[name]['accent'])
             listing.viewport().update()
+        self.update_note_group_icons()
 
     def closeEvent(self, event):
         """Сохранить данные и уничтожить просмотрщик со страницей раньше профиля."""

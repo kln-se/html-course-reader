@@ -17,7 +17,7 @@ def search(reader, query):
 
 def visible_keys(reader):
     return [item.data(Qt.ItemDataRole.UserRole) for item in reader.notes_list.items
-            if item.data(Qt.ItemDataRole.UserRole)]
+            if item.data(Qt.ItemDataRole.UserRole) and not item.isHidden()]
 
 
 @pytest.mark.parametrize('query,expected', [
@@ -52,7 +52,7 @@ def test_filter_counts_matching_groups_and_clear_restores_all_notes(reader):
     search(reader, 'yes')
     headings = [item for item in reader.notes_list.items if not item.data(Qt.ItemDataRole.UserRole)]
     assert [item.text for item in headings] == ['2.html (1)', '10.html (1)']
-    assert all(item.flags() == Qt.ItemFlag.NoItemFlags for item in headings)
+    assert all(item.flags() == Qt.ItemFlag.ItemIsEnabled for item in headings)
     reader.notes_action.setText.assert_called_with('Заметки (4)')
     search(reader, 'missing')
     assert reader.notes_list.items == []
@@ -136,7 +136,14 @@ def test_course_switch_clears_query_and_rejects_same_page_and_id_selection(reade
     target.mkdir()
     other = reader.store.add_note(target, '2.html', 'different')
     other['id'] = selected['id']
-    reader.notes_search.clear.side_effect = lambda: search(reader, '')
+    reader.collapsed_note_groups.add('2.html')
+
+    def clear_query():
+        assert reader.collapsed_note_groups == set()
+        assert reader.note_groups == {}
+        search(reader, '')
+
+    reader.notes_search.clear.side_effect = clear_query
     for name in ('catalog_timer', 'catalog_fallback', 'tree_search', 'view', 'rebuild', 'statusBar'):
         setattr(reader, name, Mock())
     reader.refresh_metadata = reader.refresh_notes

@@ -12,7 +12,7 @@ from src.course_reader.window import Window
 
 LABELS = [
     'Предыдущая страница', 'Следующая страница', 'Копировать',
-    'Выделить всё', 'Найти на странице',
+    'Добавить в заметки', 'Выделить всё', 'Найти на странице',
 ]
 
 
@@ -32,14 +32,16 @@ def context_menu(monkeypatch):
     monkeypatch.setattr('src.course_reader.window.QMenu', factory)
     state = SimpleNamespace(
         root=Path('course'), current=Path('course/1.html'),
-        page=Mock(spec=['hasSelection', 'triggerAction']),
+        page=Mock(spec=['hasSelection', 'selectedText', 'triggerAction']),
         view=Mock(spec=['mapToGlobal']), move=Mock(), show_find=Mock(),
+        add_note=Mock(),
     )
     state.page.hasSelection.return_value = True
+    state.page.selectedText.return_value = 'Цитата'
     return state, menu, actions, factory
 
 
-def test_menu_contains_only_five_russian_actions_and_uses_view_coordinates(context_menu):
+def test_menu_contains_russian_actions_and_uses_view_coordinates(context_menu):
     state, menu, actions, factory = context_menu
     position = object()
     Window.page_context_menu(state, position)
@@ -65,7 +67,10 @@ def test_selected_action_routes_to_course_or_page_operation(context_menu, select
     }.get(selected, [])
     assert state.move.call_args_list == expected_move
     assert state.page.triggerAction.call_args_list == expected_web
-    assert state.show_find.call_args_list == ([call()] if selected == LABELS[4] else [])
+    assert state.show_find.call_args_list == ([call()] if selected == 'Найти на странице' else [])
+    assert state.add_note.call_args_list == (
+        [call(initial_text='Цитата', source=(state.root, state.current))]
+        if selected == 'Добавить в заметки' else [])
     menu.deleteLater.assert_called_once_with()
 
 
@@ -75,6 +80,7 @@ def test_cancel_does_not_navigate_copy_select_or_open_find(context_menu):
     state.move.assert_not_called()
     state.page.triggerAction.assert_not_called()
     state.show_find.assert_not_called()
+    state.add_note.assert_not_called()
     menu.deleteLater.assert_called_once_with()
 
 
@@ -86,8 +92,10 @@ def test_action_availability_matches_reader_state(
     state.root = state.root if has_course else None
     state.current = state.current if has_page else None
     state.page.hasSelection.return_value = has_selection
+    state.page.selectedText.return_value = 'Цитата' if has_selection else ''
     Window.page_context_menu(state, object())
-    for label, enabled in zip(LABELS, [has_course, has_course, has_selection, has_page, has_page]):
+    for label, enabled in zip(LABELS, [has_course, has_course, has_selection,
+                                     has_course and has_page and has_selection, has_page, has_page]):
         actions[label].setEnabled.assert_called_once_with(enabled)
 
 

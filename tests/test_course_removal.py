@@ -74,6 +74,7 @@ def reader(courses):
         tree=Mock(), tree_search=Mock(), notes_search=Mock(), notes_dock=Mock(),
         favorites=Mock(), favorite_action=Mock(), notes_list=Mock(), notes_hint=Mock(),
         notes_action=Mock(), focus_page_button=Mock(), note_target=Mock(),
+        collapsed_note_groups=set(), note_groups={},
         note_buttons={name: Mock() for name in ('Добавить', 'Открыть страницу', 'Изменить', 'Удалить')},
         directory_items={}, items={'old': object()}, files=[roots[0] / '1.html'],
         filter_tree=Mock(), hide_find=Mock(), statusBar=Mock(return_value=Mock()),
@@ -89,6 +90,7 @@ def reader(courses):
     state.rebuild = lambda files: Window.rebuild(state, files)
     state.refresh_metadata = lambda: Window.refresh_metadata(state)
     state.refresh_notes = lambda: Window.refresh_notes(state)
+    state.update_note_group_icons = lambda: Window.update_note_group_icons(state)
     state.update_note_actions = lambda: Window.update_note_actions(state)
     state.update_focus_button = lambda: Window.update_focus_button(state)
     return state
@@ -97,6 +99,8 @@ def reader(courses):
 def test_current_removal_clears_ui_and_stale_events_cannot_recreate_history(reader, tmp_path):
     """Given: callback старой страницы. When: курс удалён. Then: история не воскресает."""
     root, current = reader.root, reader.current
+    reader.collapsed_note_groups.add('1.html')
+    reader.note_groups['1.html'] = (Mock(), [Mock()])
     Window.loaded(reader, True)
     callback = reader.page.runJavaScript.call_args.args[1]
     assert Window.remove_course(reader, str(root)) is True
@@ -107,6 +111,8 @@ def test_current_removal_clears_ui_and_stale_events_cannot_recreate_history(read
     reader.persist()
     assert str(root) not in Store(tmp_path).data['courses']
     assert reader.root is reader.current is None
+    assert reader.collapsed_note_groups == set()
+    assert reader.note_groups == {}
     assert reader.navigation_generation == 8
     assert reader.loading is True
     assert reader.restore_position is False

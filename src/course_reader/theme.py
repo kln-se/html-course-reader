@@ -15,11 +15,15 @@ PATHS = {
     'courses': '<path d="M4 5h6l2 2h8v12H4z"/>',
     'back': '<path d="m14 5-7 7 7 7"/>',
     'next': '<path d="m10 5 7 7-7 7"/>',
+    'chevron_down': '<path d="m5 9 7 7 7-7"/>',
     'bookmark': '<path d="M6 4h12v17l-6-4-6 4z"/>',
     'notes': '<path d="M5 4h14v13l-4 4H5zM8 8h8M8 12h8M8 16h4"/>',
     'search': '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
     'minus': '<path d="M5 12h14"/>',
     'plus': '<path d="M5 12h14M12 5v14"/>',
+    'open_page': '<path d="M13 20H5V4h10l4 4v3M14 4v5h5M12 16h9m-3-3 3 3-3 3"/>',
+    'edit': '<path d="m4 16 12-12 4 4-12 12-5 1zM13 7l4 4M4 16l4 4"/>',
+    'delete': '<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/>',
     'settings': '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/>',
     'collapse': '<path d="m4 6 6 6-6 6M20 6l-6 6 6 6"/>',
     'locate': '<circle cx="12" cy="12" r="7"/><path d="M12 2v20M2 12h20"/>',
@@ -266,7 +270,7 @@ def stylesheet(theme: str) -> str:
     QPushButton:hover, QToolButton:hover {{ background: {c['hover']}; }}
     QPushButton:pressed, QToolButton:pressed, QToolButton:checked {{ background: {c['selected']}; }}
     QPushButton:focus, QToolButton:focus {{ border-color: {c['accent']}; }}
-    QToolButton#treeControl {{ min-height: 0; padding: 0; border-radius: 5px; }}
+    QToolButton#treeControl, QToolButton#noteControl {{ min-height: 0; padding: 0; border-radius: 5px; }}
     QPushButton:disabled, QToolButton:disabled {{ color: {c['muted']}; }}
     QTreeWidget, QListWidget {{ background: {c['panel']}; border: none; outline: none; padding: 4px; selection-background-color: {c['selected']}; selection-color: {c['text']}; }}
     QTreeWidget::item, QListWidget::item {{ padding: 4px 6px; border: none; border-radius: 0; }}
