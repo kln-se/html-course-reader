@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 from src.course_reader.storage import Store
 from src.course_reader.window import Window
+from src.course_reader.identity import configure_application, set_windows_app_id
 
 
 def main() -> int:
@@ -16,7 +17,9 @@ def main() -> int:
     state = PROJECT / 'tests' / 'manual_state'
     state.mkdir(exist_ok=True)
     root = PROJECT / 'tests' / 'manual_course'
+    set_windows_app_id()
     app = QApplication(sys.argv)
+    configure_application(app)
     store = Store(state)
     course = store.course(root)
     if not course['last']:

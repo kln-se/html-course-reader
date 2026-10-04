@@ -196,10 +196,15 @@ JavaScript страницы остаётся доступным: локальн�
 Из корня проекта, в окружении с PyInstaller и зависимостями приложения:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m PyInstaller --onedir --windowed --name HtmlCourseReader --distpath dist --workpath build --specpath build main.py
+$iconAssets = (Resolve-Path .\src\course_reader\assets).Path
+.\.venv\Scripts\python.exe -B -m PyInstaller --onedir --windowed --name HtmlCourseReader --distpath dist --workpath build --specpath build --icon "$iconAssets\app.ico" --add-data "${iconAssets}:src/course_reader/assets" main.py
 ```
 
-Это ранее переданная команда ручной сборки; после переноса кода её повторное выполнение и результат ещё не проверены. Точка входа остаётся `main.py`, которая импортирует `src.course_reader.__main__`. Сборщик создаёт промежуточные файлы в `build/`, результат — в `dist/HtmlCourseReader/`. Эти каталоги исключены из Git.
+В предоставленном пользователем логе эта команда успешно завершила сборку с PyInstaller 6.22.3 и Python 3.13.3; пользователь подтвердил запуск EXE и отображение значка. Абсолютный путь к ресурсам необходим, поскольку при `--specpath build` относительный путь данных разрешается от каталога spec-файла. Точка входа — `main.py`, которая импортирует `src.course_reader.__main__`. Сборщик создаёт промежуточные файлы в `build/`, результат — в `dist/HtmlCourseReader/`. Эти каталоги исключены из Git.
+
+Параметр `--icon` задаёт значок EXE, а `--add-data` включает ресурсы для загрузки значка самим приложением. Путь ресурсов относительно модуля одинаков в исходниках и сборке; в portable-папке они находятся в `_internal/src/course_reader/assets/`. Такой способ размещения описан в [документации PyInstaller](https://pyinstaller.org/en/stable/runtime-information.html).
+
+Оригинал иконки — `src/course_reader/assets/app.svg`: светлая книга с бирюзовой закладкой на графитовом фоне. `app.ico` содержит размеры 16, 24, 32, 48, 64, 128 и 256 пикселей. Значок назначается приложению до создания окон. При ошибке его загрузки основной запуск показывает сообщение и завершается с кодом 1. До создания `QApplication` задаётся Windows AppUserModelID `HtmlCourseReader.Desktop`; недоступность системного API не препятствует запуску. Реестр и ярлыки не изменяются.
 
 Запуск: `dist/HtmlCourseReader/HtmlCourseReader.exe`. Переносить нужно всю папку `HtmlCourseReader`, включая `_internal`, а не только EXE. Python на целевом компьютере не требуется. Каталог приложения должен быть доступен для записи: рядом с EXE хранятся `settings.ini` и `history.json`. Перед повторной сборкой сохраните копию пользовательских данных существующей поставки. Материалы курсов переносятся отдельно.
 

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>HTML Course Reader — книга с закладкой</title>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#303941"/>
+  <path d="M40 72Q85 58 128 81Q171 58 216 72V186Q171 174 128 197Q85 174 40 186Z" fill="#17232C"/>
+  <path d="M42 64Q84 53 123 76V183Q84 164 42 175Z" fill="#F3F5F2"/>
+  <path d="M133 76Q172 53 214 64V175Q172 164 133 183Z" fill="#DCE5E6"/>
+  <path d="M174 60Q186 58 198 60V116L186 106L174 116Z" fill="#42CFB4"/>
+  <path d="M62 94Q83 92 103 101M62 119Q83 117 103 126M62 144Q83 142 92 146" fill="none" stroke="#7C8F94" stroke-width="7" stroke-linecap="round"/>
+  <path d="M153 138Q172 133 194 136M153 159Q168 155 179 156" fill="none" stroke="#7C8F94" stroke-width="7" stroke-linecap="round"/>
+</svg>

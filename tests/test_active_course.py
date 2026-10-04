@@ -162,6 +162,8 @@ def test_main_restores_course_after_showing_window(monkeypatch, tmp_path):
     window = SimpleNamespace(show=lambda: calls.append('show'),
                              restore_course=lambda: calls.append('restore'))
     monkeypatch.setattr(entrypoint, 'QApplication', lambda args: app)
+    monkeypatch.setattr(entrypoint, 'set_windows_app_id', Mock())
+    monkeypatch.setattr(entrypoint, 'configure_application', Mock())
     # Изолированная папка исключает чтение пользовательской истории рядом с приложением.
     monkeypatch.setattr(entrypoint, 'Store', lambda directory: Store(tmp_path))
     monkeypatch.setattr(entrypoint, 'Window', lambda store: window)
