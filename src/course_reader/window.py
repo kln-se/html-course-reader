@@ -17,6 +17,8 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
 from .viewer import Page, OfflineInterceptor
 from .storage import Store
+from .about import AboutDialog
+from .identity import APP_NAME
 from .remote_settings import RemoteResourcesSettings
 from .theme import DockTitleStyle, style_checkbox, TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
 
@@ -63,7 +65,7 @@ class Window(QMainWindow):
         self.tree_search_expanded = None
         self.collapsed_note_groups: set[str] = set()
         self.note_groups: dict[str, tuple[QListWidgetItem, list[QListWidgetItem]]] = {}
-        self.setWindowTitle('Course Reader')
+        self.setWindowTitle(APP_NAME)
         self.resize(1200, 800)
         self.setMinimumSize(760, 520)
         self.tree = QTreeWidget()
@@ -193,6 +195,7 @@ class Window(QMainWindow):
         self.action(toolbar, 'Увеличить масштаб', lambda: self.zoom(0.1), 'Ctrl+=', icon_name='plus', icon_only=True)
         toolbar.addSeparator()
         self.action(toolbar, 'Настройки', self.settings_dialog, icon_name='settings', icon_only=True)
+        self.action(toolbar, 'О приложении', self.show_about, icon_name='info', icon_only=True)
         self.find_bar = QToolBar('Поиск')
         self.addToolBar(Qt.ToolBarArea.BottomToolBarArea, self.find_bar)
         self.find_input = QLineEdit()
@@ -259,6 +262,14 @@ class Window(QMainWindow):
         self.save_timer.setSingleShot(True)
         self.save_timer.timeout.connect(self.persist)
         QApplication.instance().installEventFilter(self)
+
+    def show_about(self) -> None:
+        """Открыть сведения о приложении в текущей теме и освободить диалог после закрытия."""
+        dialog = AboutDialog(self, self.store.settings['app']['theme'])
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     def add_note_controls(self, layout: QVBoxLayout) -> None:
         """Разместить компактные действия с подсказками над содержимым панели заметок."""

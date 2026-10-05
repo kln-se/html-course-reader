@@ -66,7 +66,8 @@ def test_configure_application_sets_name_and_icon(monkeypatch):
     factory = Mock(return_value=icon)
     monkeypatch.setattr(identity, 'QIcon', factory)
     identity.configure_application(app)
-    app.setApplicationName.assert_called_once_with('Course Reader')
+    app.setApplicationName.assert_called_once_with('HTML Course Reader')
+    app.setApplicationVersion.assert_called_once_with('1.0.0')
     factory.assert_called_once_with(str(icon_path))
     app.setWindowIcon.assert_called_once_with(icon)
 

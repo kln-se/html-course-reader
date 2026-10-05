@@ -25,6 +25,7 @@ PATHS = {
     'edit': '<path d="m4 16 12-12 4 4-12 12-5 1zM13 7l4 4M4 16l4 4"/>',
     'delete': '<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/>',
     'settings': '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/>',
+    'info': '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/>',
     'collapse': '<path d="m4 6 6 6-6 6M20 6l-6 6 6 6"/>',
     'locate': '<circle cx="12" cy="12" r="7"/><path d="M12 2v20M2 12h20"/>',
     'expand': '<path d="m10 6-6 6 6 6M14 6l6 6-6 6"/>',

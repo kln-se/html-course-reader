@@ -1,4 +1,4 @@
-"""Иконка приложения и идентификатор группировки окон Windows."""
+"""Название, версия, ссылки проекта, общая иконка и группировка окон Windows."""
 
 import ctypes
 from pathlib import Path
@@ -9,6 +9,11 @@ from PySide6.QtWidgets import QApplication
 
 
 APP_ID = 'HtmlCourseReader.Desktop'
+APP_NAME = 'HTML Course Reader'
+APP_VERSION = '1.0.0'
+AUTHOR_HANDLE = '@kln-se'
+AUTHOR_URL = 'https://github.com/kln-se'
+ISSUES_URL = 'https://github.com/kln-se/html-course-reader/issues'
 
 
 def set_windows_app_id() -> bool:
@@ -35,12 +40,13 @@ def application_icon_path() -> Path:
 
 
 def configure_application(app: QApplication) -> None:
-    """Назначить имя и общую иконку до создания окон и диалогов.
+    """Назначить имя, версию и общую иконку до создания окон и диалогов.
 
     Raises:
         RuntimeError: Иконка отсутствует или не читается; сборка неполна.
     """
-    app.setApplicationName('Course Reader')
+    app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
     path = application_icon_path()
     icon = QIcon(str(path))
     if icon.isNull():
