@@ -229,9 +229,10 @@ def test_chooser_removes_selected_row_only_after_success(monkeypatch, success):
     monkeypatch.setattr(module, 'QVBoxLayout', Mock(return_value=layout))
     monkeypatch.setattr(module, 'QListWidget', Mock(return_value=listing))
     monkeypatch.setattr(module, 'QPushButton', button)
-    monkeypatch.setattr(module, 'RowDelegate', Mock())
+    monkeypatch.setattr(module, 'CourseRowDelegate', Mock())
     monkeypatch.setattr(module, 'interface_font', Mock())
-    state = SimpleNamespace(root=None, store=SimpleNamespace(data={'courses': {'selected-course': {}}}),
+    state = SimpleNamespace(root=None, store=SimpleNamespace(data={'courses': {'selected-course': {}}},
+                                                           settings={'app': {'theme': 'dark'}}),
                             remove_course=Mock(return_value=success))
     Window.choose_course(state)
     remove = buttons['Удалить из списка']

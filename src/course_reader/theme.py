@@ -1,4 +1,5 @@
 """Единая типографика, палитры и векторные пиктограммы интерфейса читалки."""
+from pathlib import PureWindowsPath
 from PySide6.QtCore import QByteArray, QEvent, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap, QFontMetrics, QPalette
 from PySide6.QtSvg import QSvgRenderer
@@ -129,6 +130,63 @@ class RowDelegate(QStyledItemDelegate):
         """Сохранить ширину содержимого и обеспечить удобную высоту строки."""
         size = super().sizeHint(option, index)
         return QSize(size.width(), max(size.height(), 32))
+
+
+def course_title(path: str) -> str:
+    """Получить имя корневой папки, сохранив путь для корня диска или сетевой шары."""
+    return PureWindowsPath(path).name or path
+
+
+class CourseRowDelegate(RowDelegate):
+    """Показывать имя курса над полным путём, не изменяя ключ строки в модели."""
+
+    @staticmethod
+    def row_fonts(font: QFont) -> tuple[QFont, QFont]:
+        """Выделить название полужирным, а путь — меньшим моноширинным шрифтом."""
+        title = QFont(font)
+        title.setWeight(QFont.Weight.DemiBold)
+        path = interface_font(monospace=True)
+        path.setWeight(QFont.Weight.Normal)
+        if title.pointSizeF() > 0:
+            path.setPointSizeF(max(8.0, title.pointSizeF() - 1.0))
+        return title, path
+
+    def sizeHint(self, option, index):
+        """Отвести высоту двум строкам, не растягивая список по длине пути."""
+        title, path = self.row_fonts(option.font)
+        return QSize(0, max(56, QFontMetrics(title).height() + QFontMetrics(path).height() + 20))
+
+    def paint(self, painter, option, index):
+        """Нарисовать две строки с сокращением текста и общим выделением курса."""
+        styled = QStyleOptionViewItem(option)
+        self.initStyleOption(styled, index)
+        path = styled.text
+        title_font, path_font = self.row_fonts(styled.font)
+        title_metrics, path_metrics = QFontMetrics(title_font), QFontMetrics(path_font)
+        area = styled.rect.adjusted(12, 8, -12, -8)
+        title_rect = QRect(area.left(), area.top(), max(0, area.width()), title_metrics.height())
+        path_rect = QRect(area.left(), title_rect.bottom() + 5, max(0, area.width()), path_metrics.height())
+        colors = PALETTES.get(styled.widget.property('theme'), PALETTES['dark'])
+        focused = bool(styled.state & QStyle.StateFlag.State_HasFocus)
+        styled.state &= ~QStyle.StateFlag.State_HasFocus
+        styled.text = ''
+        painter.save()
+        try:
+            styled.widget.style().drawControl(QStyle.ControlElement.CE_ItemViewItem, styled, painter, styled.widget)
+            painter.setClipRect(styled.rect, Qt.ClipOperation.IntersectClip)
+            painter.setFont(title_font)
+            painter.setPen(QColor(colors['text']))
+            painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                             title_metrics.elidedText(course_title(path), Qt.TextElideMode.ElideRight, title_rect.width()))
+            painter.setFont(path_font)
+            painter.setPen(QColor(colors['muted']))
+            painter.drawText(path_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                             path_metrics.elidedText(path, Qt.TextElideMode.ElideMiddle, path_rect.width()))
+            if focused:
+                painter.fillRect(QRect(styled.rect.left(), styled.rect.top() + 5, 3,
+                                       max(0, styled.rect.height() - 10)), QColor(colors['accent']))
+        finally:
+            painter.restore()
 
 
 TREE_PREFIX_ROLE = int(Qt.ItemDataRole.UserRole) + 1

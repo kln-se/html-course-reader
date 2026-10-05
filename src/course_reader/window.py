@@ -19,6 +19,7 @@ from .viewer import Page, OfflineInterceptor
 from .storage import Store
 from .about import AboutDialog
 from .identity import APP_NAME
+from .theme import CourseRowDelegate
 from .remote_settings import RemoteResourcesSettings
 from .theme import DockTitleStyle, style_checkbox, TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
 
@@ -391,9 +392,14 @@ class Window(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
         listing = QListWidget()
-        listing.setFont(interface_font(monospace=True))
-        listing.setItemDelegate(RowDelegate(listing))
-        listing.addItems(list(self.store.data['courses']))
+        listing.setFont(interface_font())
+        listing.setItemDelegate(CourseRowDelegate(listing))
+        listing.setProperty('theme', self.store.settings['app']['theme'])
+        listing.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        courses = list(self.store.data['courses'])
+        listing.addItems(courses)
+        for row, path in enumerate(courses):
+            listing.item(row).setToolTip(path)
         if self.root is not None:
             matches = listing.findItems(str(self.root), Qt.MatchFlag.MatchExactly)
             if matches:
