@@ -787,6 +787,7 @@ class Window(QMainWindow):
     def loaded(self, success):
         """Восстановить место HTML/HTM только при открытии из интерфейса, не при переходе по ссылке.
 
+        Сохранённые координаты Qt переводятся в CSS-пиксели с учётом масштаба просмотра.
         В MHTML/MHT JavaScript восстановления не выполняется из-за ограничений
         движка; якорь и прокрутку переходов по ссылкам обрабатывает WebEngine."""
         if self.closing or not self.current:
@@ -805,7 +806,9 @@ class Window(QMainWindow):
         position = self.store.course(self.root)['scroll'].get(relative, 0)
         if (self.restore_position and not self.view.url().hasFragment()
                 and self.current.suffix.lower() not in ('.mhtml', '.mht')):
-            self.page.runJavaScript(f'window.scrollTo(0, {float(position)});', restored)
+            # История хранит логические пиксели Qt, scrollTo принимает CSS-пиксели.
+            css_position = float(position) / self.view.zoomFactor()
+            self.page.runJavaScript(f'window.scrollTo(0, {css_position});', restored)
         else:
             restored(None)
 

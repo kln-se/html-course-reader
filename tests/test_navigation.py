@@ -28,7 +28,7 @@ def reader(tmp_path):
         save_timer=SimpleNamespace(start=timers.append),
         statusBar=lambda: SimpleNamespace(showMessage=messages.append),
     )
-    state.view = SimpleNamespace(url=lambda: state.address)
+    state.view = SimpleNamespace(url=lambda: state.address, zoomFactor=lambda: 1.0)
     state.store.course(root)['scroll']['1.html'] = 425
     return state
 
@@ -50,6 +50,29 @@ def test_loaded_without_saved_position_restores_top(reader):
     reader.store.course(reader.root)['scroll'].clear()
     Window.loaded(reader, True)
     assert reader.scripts[0][0] == 'window.scrollTo(0, 0.0);'
+
+
+@pytest.mark.parametrize('zoom', [0.8, 1.0, 1.1, 1.5])
+def test_repeated_restore_does_not_accumulate_scroll_drift(reader, zoom):
+    """Given: масштаб Qt. When: десять восстановлений. Then: место чтения сохраняется."""
+    reader.view.zoomFactor = lambda: zoom
+    saved_position = 900.0
+    reader.store.course(reader.root)['scroll']['1.html'] = saved_position
+
+    for _ in range(10):
+        reader.loading = True
+        reader.navigation_generation += 1
+        Window.loaded(reader, True)
+        script, callback = reader.scripts[-1]
+        css_position = float(script.removeprefix('window.scrollTo(0, ').removesuffix(');'))
+        assert css_position * zoom == pytest.approx(saved_position)
+        callback(None)
+        # Модель внешней границы: Qt сообщает CSS scrollY, умноженный на масштаб.
+        qt_position = css_position * zoom
+        Window.scroll_changed(reader, SimpleNamespace(y=lambda: qt_position))
+        assert reader.store.course(reader.root)['scroll']['1.html'] == pytest.approx(saved_position)
+
+    assert reader.timers == [700] * 10
 
 
 def test_loaded_anchor_keeps_browser_position(reader):
