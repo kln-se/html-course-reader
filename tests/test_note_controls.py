@@ -90,10 +90,5 @@ def test_note_target_and_action_states(has_root, has_current, selected):
     subject.note_buttons['Добавить'].setEnabled.assert_called_once_with(can_add)
     for key, _, _, _ in ACTIONS[1:]:
         subject.note_buttons[key].setEnabled.assert_called_once_with(selected)
-    if can_add:
-        subject.note_target.setText.assert_called_once_with(
-            '<b>Открытая страница:</b> &lt;b&gt;&amp;&quot;quoted&quot;.html')
-        subject.note_target.setToolTip.assert_called_once_with('Открытая страница: <b>&"quoted".html')
-    else:
-        subject.note_target.setText.assert_called_once_with('Нет открытой страницы')
-        subject.note_target.setToolTip.assert_called_once_with('Нет открытой страницы')
+    subject.note_target.set_page.assert_called_once_with(
+        '<b>&"quoted".html' if can_add else None)

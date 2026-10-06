@@ -1,7 +1,6 @@
 """Интерфейс чтения, выбора курсов и работы с заметками."""
 from datetime import datetime, timezone
 from copy import deepcopy
-from html import escape
 from pathlib import Path
 import subprocess
 from shiboken6 import delete
@@ -11,7 +10,7 @@ from PySide6.QtWidgets import (QMainWindow, QTreeWidget, QTreeWidgetItem, QListW
     QTabWidget, QSplitter, QToolBar, QMessageBox, QFileDialog, QDialog, QVBoxLayout,
     QPushButton, QInputDialog, QDockWidget, QWidget, QLineEdit, QCheckBox, QComboBox,
     QDialogButtonBox, QFormLayout, QLabel, QMenu, QListWidgetItem, QHBoxLayout, QToolButton, QApplication,
-    QListView, QSizePolicy, QPlainTextEdit)
+    QListView, QPlainTextEdit)
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from .catalog import scan, PAGE_SUFFIXES, adjacent, explorer_arguments, natural_key
@@ -20,10 +19,10 @@ from .storage import Store
 from .about import AboutDialog
 from .identity import APP_NAME
 from .theme import CourseRowDelegate
+from .note_presentation import NOTE_GROUP_ROLE, NOTE_COUNT_ROLE, NOTE_TEXT_ROLE, NOTE_TIME_ROLE, NoteRowDelegate, OpenPageSummary
 from .remote_settings import RemoteResourcesSettings
 from .theme import DockTitleStyle, style_checkbox, TreeRowDelegate, TREE_PREFIX_ROLE, TREE_FOLDER_ROLE, EmptyHint, PALETTES, RowDelegate, icon, interface_font, stylesheet
 
-NOTE_GROUP_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 
 
 def format_note_time(value: str) -> str:
@@ -231,10 +230,7 @@ class Window(QMainWindow):
         self.notes_list.itemDoubleClicked.connect(
             lambda item: self.open_note_page() if item.data(Qt.ItemDataRole.UserRole) else None)
         layout.addWidget(self.notes_list)
-        self.note_target = QLabel('Нет открытой страницы')
-        self.note_target.setTextFormat(Qt.TextFormat.RichText)
-        self.note_target.setWordWrap(True)
-        self.note_target.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.note_target = OpenPageSummary()
         layout.addWidget(self.note_target)
         self.notes_dock.setWidget(panel)
         self.notes_dock.setMinimumWidth(240)
@@ -255,6 +251,7 @@ class Window(QMainWindow):
         for listing in (self.tree, self.favorites, self.notes_list):
             listing.setItemDelegate(TreeRowDelegate(listing) if listing is self.tree else RowDelegate(listing))
             listing.setMouseTracking(True)
+        self.notes_list.setItemDelegate(NoteRowDelegate(self.notes_list))
         self.status_bar = self.statusBar()
         self.status_bar.setFont(interface_font(monospace=True))
         self.status_bar.messageChanged.connect(self.update_status_tooltip)
@@ -913,6 +910,7 @@ class Window(QMainWindow):
                 heading = QListWidgetItem(f'{relative} ({len(notes)})')
                 heading.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 heading.setData(NOTE_GROUP_ROLE, (str(self.root), relative))
+                heading.setData(NOTE_COUNT_ROLE, len(notes))
                 font = heading.font()
                 font.setBold(True)
                 heading.setFont(font)
@@ -921,7 +919,10 @@ class Window(QMainWindow):
                 collapsed = not query and relative in self.collapsed_note_groups
                 rows = []
                 for note in notes:
-                    item = QListWidgetItem(note['text'] + '\nИзменено: ' + format_note_time(note['updated']))
+                    updated = format_note_time(note['updated'])
+                    item = QListWidgetItem(note['text'] + '\nИзменено: ' + updated)
+                    item.setData(NOTE_TEXT_ROLE, note['text'])
+                    item.setData(NOTE_TIME_ROLE, updated)
                     key = (str(self.root), relative, note['id'])
                     item.setData(Qt.ItemDataRole.UserRole, key)
                     item.setToolTip(relative)
@@ -976,10 +977,7 @@ class Window(QMainWindow):
         can_add = self.root is not None and self.current is not None
         self.note_buttons['Добавить'].setEnabled(can_add)
         relative = self.current.relative_to(self.root).as_posix() if can_add else None
-        target = 'Открытая страница: ' + relative if can_add else 'Нет открытой страницы'
-        self.note_target.setText('<b>Открытая страница:</b> ' + escape(relative)
-                                 if can_add else target)
-        self.note_target.setToolTip(target)
+        self.note_target.set_page(relative)
         selected = self.selected_note() is not None
         for label in ('Открыть страницу', 'Изменить', 'Удалить'):
             self.note_buttons[label].setEnabled(selected)
@@ -1225,6 +1223,7 @@ class Window(QMainWindow):
     def apply_theme(self):
         """Применить светлую или графитовую палитру к виджетам, не меняя HTML страницы."""
         name = self.store.settings['app']['theme']
+        self.note_target.set_theme(name)
         self.setStyleSheet(stylesheet(name))
         previous_style = getattr(self, '_notes_title_style', None)
         self._notes_title_style = DockTitleStyle(name, self.notes_dock)

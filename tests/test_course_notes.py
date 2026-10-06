@@ -302,14 +302,11 @@ def test_target_label_follows_current_page_not_selected_note(reader):
     for relative in ('1.html', 'chapter/3.html'):
         reader.current = reader.root / relative
         reader.update_note_actions()
-        expected = f'Открытая страница: {relative}'
-        reader.note_target.setText.assert_called_with(f'<b>Открытая страница:</b> {relative}')
-        reader.note_target.setToolTip.assert_called_with(expected)
+        reader.note_target.set_page.assert_called_with(relative)
         assert reader.selected_note() == ('2.html', note)
     reader.current = None
     reader.update_note_actions()
-    reader.note_target.setText.assert_called_with('Нет открытой страницы')
-    reader.note_target.setToolTip.assert_called_with('Нет открытой страницы')
+    reader.note_target.set_page.assert_called_with(None)
 
 
 @pytest.mark.parametrize('has_current_page', [True, False])
