@@ -19,3 +19,4 @@ history.json
 settings.ini
 /build
 /dist
+/tests/temp/

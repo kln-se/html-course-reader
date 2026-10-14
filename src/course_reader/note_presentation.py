@@ -1,13 +1,32 @@
 """Представление групп заметок, текста записей и сведений об открытой странице."""
 
+from collections.abc import Mapping
 from math import ceil
 from pathlib import PurePosixPath
+from typing import cast
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPainter, QTextCharFormat, QTextCursor, QTextDocument, QTextOption
-from PySide6.QtWidgets import QSizePolicy, QStyle, QStyleOptionViewItem, QWidget
+from PySide6.QtCore import QEvent, QModelIndex, QPersistentModelIndex, QRect, QSize, Qt
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QIcon,
+    QPainter,
+    QPaintEvent,
+    QTextCharFormat,
+    QTextCursor,
+    QTextDocument,
+    QTextOption,
+)
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionViewItem,
+    QWidget,
+)
 
-from .theme import CourseRowDelegate, PALETTES, RowDelegate
+from .theme import PALETTES, CourseRowDelegate, RowDelegate
 
 NOTE_GROUP_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 NOTE_COUNT_ROLE = NOTE_GROUP_ROLE + 1
@@ -20,7 +39,13 @@ def page_name(relative: str) -> str:
     return PurePosixPath(relative).name or relative
 
 
-def draw_page_lines(painter, rect, font, colors, relative: str) -> None:
+def draw_page_lines(
+    painter: QPainter,
+    rect: QRect,
+    font: QFont,
+    colors: Mapping[str, str],
+    relative: str,
+) -> None:
     """Нарисовать имя и путь обычным текстом, сокращая их по доступной ширине."""
     title_font, path_font = CourseRowDelegate.row_fonts(font)
     top = rect.top()
@@ -32,8 +57,11 @@ def draw_page_lines(painter, rect, font, colors, relative: str) -> None:
         line = QRect(rect.left(), top, max(0, rect.width()), metrics.height())
         painter.setFont(line_font)
         painter.setPen(QColor(color))
-        painter.drawText(line, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                         metrics.elidedText(text, mode, line.width()))
+        painter.drawText(
+            line,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            metrics.elidedText(text, mode, line.width()),
+        )
         top += metrics.height() + 4
 
 
@@ -41,7 +69,9 @@ class NoteRowDelegate(RowDelegate):
     """Отображать заголовки групп и заметки с переносом текста и второстепенной датой."""
 
     @staticmethod
-    def note_document(option, index):
+    def note_document(
+        option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
+    ) -> QTextDocument:
         """Сформировать переносимый текст заметки с отдельным приглушённым временем."""
         colors = PALETTES.get(option.widget.property("theme"), PALETTES["dark"])
         document = QTextDocument()
@@ -52,7 +82,7 @@ class NoteRowDelegate(RowDelegate):
         document.setDefaultTextOption(text_option)
         width = option.rect.width()
         if width <= 0:
-            width = option.widget.viewport().width()
+            width = cast(QAbstractItemView, option.widget).viewport().width()
         document.setTextWidth(max(1, width - 16))
         cursor = QTextCursor(document)
         body = QTextCharFormat()
@@ -66,16 +96,27 @@ class NoteRowDelegate(RowDelegate):
         cursor.insertText("Изменено: " + index.data(NOTE_TIME_ROLE), metadata)
         return document
 
-    def sizeHint(self, option, index):
+    def sizeHint(
+        self, option: QStyleOptionViewItem, index: QModelIndex | QPersistentModelIndex
+    ) -> QSize:
         """Рассчитать высоту строки с учётом переноса текста заметки и внутренних отступов."""
         if not index.data(NOTE_GROUP_ROLE):
             if index.data(NOTE_TEXT_ROLE) is not None:
-                return QSize(0, ceil(self.note_document(option, index).size().height()) + 16)
+                return QSize(
+                    0, ceil(self.note_document(option, index).size().height()) + 16
+                )
             return super().sizeHint(option, index)
         title, path = CourseRowDelegate.row_fonts(option.font)
-        return QSize(0, max(56, QFontMetrics(title).height() + QFontMetrics(path).height() + 20))
+        return QSize(
+            0, max(56, QFontMetrics(title).height() + QFontMetrics(path).height() + 20)
+        )
 
-    def paint(self, painter, option, index):
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionViewItem,
+        index: QModelIndex | QPersistentModelIndex,
+    ) -> None:
         """Нарисовать заголовок группы или текст заметки с приглушённой датой изменения."""
         group = index.data(NOTE_GROUP_ROLE)
         if not group:
@@ -87,7 +128,12 @@ class NoteRowDelegate(RowDelegate):
                 styled.state &= ~QStyle.StateFlag.State_HasFocus
                 painter.save()
                 try:
-                    styled.widget.style().drawControl(QStyle.ControlElement.CE_ItemViewItem, styled, painter, styled.widget)
+                    styled.widget.style().drawControl(
+                        QStyle.ControlElement.CE_ItemViewItem,
+                        styled,
+                        painter,
+                        styled.widget,
+                    )
                     painter.setClipRect(styled.rect, Qt.ClipOperation.IntersectClip)
                     painter.translate(styled.rect.left() + 8, styled.rect.top() + 8)
                     document.drawContents(painter)
@@ -108,11 +154,23 @@ class NoteRowDelegate(RowDelegate):
         count = str(index.data(NOTE_COUNT_ROLE) or 0)
         area = styled.rect.adjusted(8, 8, -8, -8)
         badge_width = min(max(0, area.width()), metrics.horizontalAdvance(count) + 16)
-        badge = QRect(area.right() - badge_width + 1, area.top(), badge_width, metrics.height() + 4)
-        text_rect = QRect(area.left() + 24, area.top(), max(0, area.width() - badge_width - 32), area.height())
+        badge = QRect(
+            area.right() - badge_width + 1,
+            area.top(),
+            badge_width,
+            metrics.height() + 4,
+        )
+        text_rect = QRect(
+            area.left() + 24,
+            area.top(),
+            max(0, area.width() - badge_width - 32),
+            area.height(),
+        )
         painter.save()
         try:
-            styled.widget.style().drawControl(QStyle.ControlElement.CE_ItemViewItem, styled, painter, styled.widget)
+            styled.widget.style().drawControl(
+                QStyle.ControlElement.CE_ItemViewItem, styled, painter, styled.widget
+            )
             painter.setClipRect(styled.rect, Qt.ClipOperation.IntersectClip)
             chevron.paint(painter, QRect(area.left(), area.top() + 2, 16, 16))
             draw_page_lines(painter, text_rect, styled.font, colors, group[1])
@@ -130,10 +188,10 @@ class NoteRowDelegate(RowDelegate):
 class OpenPageSummary(QWidget):
     """Показывать текущую страницу без фокуса, горизонтальной прокрутки и HTML-разметки."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         """Создать информационный блок, пока страница не открыта."""
         super().__init__(parent)
-        self.relative = None
+        self.relative: str | None = None
         self.theme = "dark"
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -153,7 +211,7 @@ class OpenPageSummary(QWidget):
         self.theme = name
         self.update()
 
-    def sizeHint(self):
+    def sizeHint(self) -> QSize:
         """Отвести место подписи, двум строкам страницы и разделителю."""
         title, path = CourseRowDelegate.row_fonts(self.font())
         height = QFontMetrics(path).height() + 18
@@ -161,13 +219,13 @@ class OpenPageSummary(QWidget):
             height += QFontMetrics(title).height() + QFontMetrics(path).height() + 8
         return QSize(0, height)
 
-    def changeEvent(self, event):
+    def changeEvent(self, event: QEvent) -> None:
         """Пересчитать высоту при смене шрифта приложения."""
         super().changeEvent(event)
         if event.type() == QEvent.Type.FontChange:
             self.updateGeometry()
 
-    def paintEvent(self, event):
+    def paintEvent(self, event: QPaintEvent) -> None:
         """Нарисовать разделитель, подпись и страницу в пределах ширины панели."""
         colors = PALETTES.get(self.theme, PALETTES["dark"])
         painter = QPainter(self)
@@ -179,12 +237,19 @@ class OpenPageSummary(QWidget):
             painter.setFont(caption_font)
             painter.setPen(QColor(colors["muted"]))
             caption = "Открытая страница:" if self.relative else "Нет открытой страницы"
-            painter.drawText(QRect(0, 10, self.width(), metrics.height()),
-                             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                             metrics.elidedText(caption, Qt.TextElideMode.ElideRight, self.width()))
+            painter.drawText(
+                QRect(0, 10, self.width(), metrics.height()),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                metrics.elidedText(caption, Qt.TextElideMode.ElideRight, self.width()),
+            )
             if self.relative:
                 top = 10 + metrics.height() + 6
-                draw_page_lines(painter, QRect(0, top, self.width(), max(0, self.height() - top)),
-                                self.font(), colors, self.relative)
+                draw_page_lines(
+                    painter,
+                    QRect(0, top, self.width(), max(0, self.height() - top)),
+                    self.font(),
+                    colors,
+                    self.relative,
+                )
         finally:
             painter.end()

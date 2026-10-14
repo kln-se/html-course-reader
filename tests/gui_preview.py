@@ -1,36 +1,40 @@
 """Запуск ручной проверки с отдельными данными и синтетическим курсом."""
+
 import sys
 from pathlib import Path
 
-PROJECT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT))
-
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
-from src.course_reader.storage import Store
-from src.course_reader.window import Window
-from src.course_reader.identity import configure_application, set_windows_app_id
+
+PROJECT = Path(__file__).resolve().parent.parent
 
 
 def main() -> int:
     """Открыть тестовый курс, сохраняя историю только в tests/manual_state."""
-    state = PROJECT / 'tests' / 'manual_state'
+    sys.path.insert(0, str(PROJECT))
+    from src.course_reader.identity import configure_application, set_windows_app_id
+    from src.course_reader.storage import Store
+    from src.course_reader.window import Window
+
+    state = PROJECT / "tests" / "manual_state"
     state.mkdir(exist_ok=True)
-    root = PROJECT / 'tests' / 'manual_course'
+    root = PROJECT / "tests" / "manual_course"
     set_windows_app_id()
     app = QApplication(sys.argv)
     configure_application(app)
     store = Store(state)
     course = store.course(root)
-    if not course['last']:
-        course['last'] = '01-basics/01-welcome.html'
+    if not course["last"]:
+        course["last"] = "01-basics/01-welcome.html"
     window = Window(store)
-    window.setWindowTitle('Course Reader — ручная проверка')
-    window.view.loadFinished.connect(lambda ok: print(f'LOAD {ok}: {window.view.url().toString()}', flush=True))
+    window.setWindowTitle("Course Reader — ручная проверка")
+    window.view.loadFinished.connect(
+        lambda ok: print(f"LOAD {ok}: {window.view.url().toString()}", flush=True)
+    )
     window.show()
     QTimer.singleShot(0, lambda: window.set_course(root))
     return app.exec()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

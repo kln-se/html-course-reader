@@ -1,34 +1,46 @@
 """Проверки типографики и подтверждения внешнего файла без приложения и окон Qt."""
+
 from types import SimpleNamespace as NS
+from typing import cast
 
 import pytest
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QModelIndex, Qt
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QMessageBox, QStyleOptionViewItem
 
 from src.course_reader import theme
 from src.course_reader.window import Window
 
 
-@pytest.mark.parametrize(('folder', 'weight'), [
-    (True, QFont.Weight.Bold), (False, QFont.Weight.Normal),
-])
-def test_tree_font_distinguishes_folders_and_resets_file_weight(monkeypatch, folder, weight):
+@pytest.mark.parametrize(
+    ("folder", "weight"),
+    [
+        (True, QFont.Weight.Bold),
+        (False, QFont.Weight.Normal),
+    ],
+)
+def test_tree_font_distinguishes_folders_and_resets_file_weight(
+    monkeypatch, folder, weight
+):
     """Given: исходный Bold. When: стиль строки. Then: файл Normal, папка Bold."""
-    monkeypatch.setattr(theme.RowDelegate, 'initStyleOption', lambda *args: None)
-    monkeypatch.setattr(theme, 'QFontMetrics', lambda font: ('metrics', font.weight()))
+    monkeypatch.setattr(theme.RowDelegate, "initStyleOption", lambda *args: None)
+    monkeypatch.setattr(theme, "QFontMetrics", lambda font: ("metrics", font.weight()))
     font = QFont()
     font.setWeight(QFont.Weight.Bold)
     option = NS(font=font)
     index = NS(data=lambda role: folder if role == theme.TREE_FOLDER_ROLE else None)
     delegate = theme.TreeRowDelegate()
-    delegate.initStyleOption(option, index)
+    delegate.initStyleOption(
+        cast(QStyleOptionViewItem, option), cast(QModelIndex, index)
+    )
     assert option.font.weight() == weight
-    assert option.fontMetrics == ('metrics', weight)
+    assert option.fontMetrics == ("metrics", weight)
 
 
 class Confirmation:
     """Записать настройки диалога и вернуть выбранную кнопку без создания QWidget."""
+
+    choice: int | None
     Icon = QMessageBox.Icon
     ButtonRole = QMessageBox.ButtonRole
 
@@ -68,11 +80,23 @@ class Confirmation:
         return self.buttons[self.choice] if self.choice is not None else None
 
 
-@pytest.mark.parametrize(('choice', 'success', 'launches', 'warnings'), [
-    (0, True, 1, 0), (1, True, 0, 0), (None, True, 0, 0), (0, False, 1, 1),
-], ids=['open', 'cancel', 'window-close', 'windows-open-failed'])
+@pytest.mark.parametrize(
+    ("choice", "success", "launches", "warnings"),
+    [
+        (0, True, 1, 0),
+        (1, True, 0, 0),
+        (None, True, 0, 0),
+        (0, False, 1, 1),
+    ],
+    ids=["open", "cancel", "window-close", "windows-open-failed"],
+)
 def test_external_file_requires_open_and_reports_launch_failure(
-    tmp_path, monkeypatch, choice, success, launches, warnings,
+    tmp_path,
+    monkeypatch,
+    choice,
+    success,
+    launches,
+    warnings,
 ):
     """Given: ответ диалога. When: внешний файл. Then: запуск только после Открыть."""
     dialogs, opened, reported = [], [], []
@@ -91,23 +115,25 @@ def test_external_file_requires_open_and_reports_launch_failure(
         opened.append(url.toLocalFile())
         return success
 
-    monkeypatch.setattr('src.course_reader.window.QMessageBox', Dialog)
-    monkeypatch.setattr('src.course_reader.window.QDesktopServices.openUrl', open_url)
+    monkeypatch.setattr("src.course_reader.window.QMessageBox", Dialog)
+    monkeypatch.setattr("src.course_reader.window.QDesktopServices.openUrl", open_url)
     state = NS()
-    path = tmp_path / '<материал> с пробелами &.mp4'
-    Window.external_file(state, path)
-    assert opened == [str(path).replace('\\', '/')] * launches
+    path = tmp_path / "<материал> с пробелами &.mp4"
+    Window.external_file(cast(Window, state), path)
+    assert opened == [str(path).replace("\\", "/")] * launches
     assert len(reported) == warnings
-    dialog, = dialogs
+    (dialog,) = dialogs
     assert dialog.parent is state
-    assert dialog.title == 'Внешний файл'
+    assert dialog.title == "Внешний файл"
     assert dialog.text_format == Qt.TextFormat.PlainText
     assert str(path) in dialog.text
     assert [(button.text, button.role) for button in dialog.buttons] == [
-        ('Открыть', QMessageBox.ButtonRole.AcceptRole),
-        ('Отмена', QMessageBox.ButtonRole.RejectRole),
+        ("Открыть", QMessageBox.ButtonRole.AcceptRole),
+        ("Отмена", QMessageBox.ButtonRole.RejectRole),
     ]
     assert dialog.default is dialog.buttons[1]
     assert dialog.escape is dialog.buttons[1]
     if reported:
-        assert reported == [(state, 'Ошибка открытия', 'Windows не удалось открыть файл.')]
+        assert reported == [
+            (state, "Ошибка открытия", "Windows не удалось открыть файл.")
+        ]

@@ -1,31 +1,39 @@
 """Построение каталога и правила перехода по материалам."""
+
 import fnmatch
 import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-PAGE_SUFFIXES = {'.html', '.htm', '.mhtml', '.mht'}
+PAGE_SUFFIXES = {".html", ".htm", ".mhtml", ".mht"}
 
 
-def natural_key(value: str) -> tuple:
+def natural_key(value: str) -> tuple[tuple[tuple[int, int | str], ...], str, str]:
     """Вернуть ключ естественной сортировки с числовыми группами и устойчивым порядком имён."""
-    parts = tuple((1, int(part)) if part.isdigit() else (0, part.casefold())
-                  for part in re.split(r'(\d+)', value))
+    parts = tuple(
+        (1, int(part)) if part.isdigit() else (0, part.casefold())
+        for part in re.split(r"(\d+)", value)
+    )
     return parts, value.casefold(), value
 
 
 def matches(path: Path, patterns: list[str]) -> bool:
     """Проверить имя файла по маскам fnmatch без учёта регистра; путь к папке не учитывается."""
-    return any(fnmatch.fnmatchcase(path.name.casefold(), p.casefold()) for p in patterns)
+    return any(
+        fnmatch.fnmatchcase(path.name.casefold(), p.casefold()) for p in patterns
+    )
 
 
-def scan(root: Path, patterns: list[str], *, directories: list[Path] | None = None) -> list[Path]:
+def scan(
+    root: Path, patterns: list[str], *, directories: list[Path] | None = None
+) -> list[Path]:
     """Собрать подходящие файлы рекурсивным обходом в естественном порядке.
 
     Символические ссылки и недоступные для перечисления папки пропускаются.
     Возвращаемые пути сохраняют форму заданного root; пустые папки не входят в результат.
     Если передан directories, добавить туда все посещённые папки для наблюдения."""
     result = []
+
     def visit(directory: Path) -> None:
         """Добавить файлы доступной папки и её подкаталогов в общий результат обхода."""
         if directories is not None and directory.is_dir():
@@ -41,6 +49,7 @@ def scan(root: Path, patterns: list[str], *, directories: list[Path] | None = No
                 visit(child)
             elif child.is_file() and matches(child, patterns):
                 result.append(child)
+
     visit(root)
     return result
 
@@ -51,7 +60,7 @@ def adjacent(pages: list[Path], current: Path | None, step: int) -> Path | None:
     При отсутствии current выбрать первый файл для шага 1 и последний для -1.
     Другой шаг вызывает ValueError; обход не замыкается в кольцо."""
     if step not in (-1, 1):
-        raise ValueError('Шаг должен быть -1 или 1')
+        raise ValueError("Шаг должен быть -1 или 1")
     if not pages:
         return None
     if current not in pages:
@@ -63,11 +72,11 @@ def adjacent(pages: list[Path], current: Path | None, step: int) -> Path | None:
 def link_kind(address: str) -> str:
     """Классифицировать схему адреса как internet, local или blocked без проверки существования файла."""
     scheme = urlparse(address).scheme.lower()
-    if scheme in ('http', 'https'):
-        return 'internet'
-    if scheme in ('', 'file'):
-        return 'local'
-    return 'blocked'
+    if scheme in ("http", "https"):
+        return "internet"
+    if scheme in ("", "file"):
+        return "local"
+    return "blocked"
 
 
 def explorer_arguments(path: Path) -> list[str]:
@@ -78,5 +87,5 @@ def explorer_arguments(path: Path) -> list[str]:
     """
     path = path.resolve()
     if path.is_dir() or path.is_file():
-        return ['explorer.exe', '/select,', str(path)]
+        return ["explorer.exe", "/select,", str(path)]
     raise FileNotFoundError(str(path))

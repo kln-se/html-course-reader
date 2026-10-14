@@ -4,9 +4,11 @@ from types import SimpleNamespace as NS
 from unittest.mock import Mock
 
 import pytest
+from test_catalog_refresh import rebuild_state as _rebuild_state_fixture
 
 from src.course_reader.window import Window
-from test_catalog_refresh import rebuild_state
+
+rebuild_state = _rebuild_state_fixture
 
 
 @pytest.fixture
@@ -22,8 +24,8 @@ def focus_state(rebuild_state):
 
 def test_focus_expands_only_current_ancestry_and_preserves_reader(focus_state):
     state = focus_state
-    page = state.root / 'chapter' / 'nested' / '1.html'
-    other = state.root / 'other' / '2.html'
+    page = state.root / "chapter" / "nested" / "1.html"
+    other = state.root / "other" / "2.html"
     state.current = page
     Window.rebuild(state, [page, other])
     state.tree.setCurrentItem(state.items[str(other)])
@@ -44,11 +46,11 @@ def test_focus_expands_only_current_ancestry_and_preserves_reader(focus_state):
     assert state.focus_page_button.enabled
 
 
-@pytest.mark.parametrize('opened', [False, True])
+@pytest.mark.parametrize("opened", [False, True])
 def test_unavailable_current_page_disables_button_and_does_nothing(focus_state, opened):
     state = focus_state
-    visible = state.root / 'visible.html'
-    state.current = state.root / 'hidden.html' if opened else None
+    visible = state.root / "visible.html"
+    state.current = state.root / "hidden.html" if opened else None
     Window.rebuild(state, [visible])
     selected = state.items[str(visible)]
     state.tree.setCurrentItem(selected)
@@ -65,27 +67,27 @@ def test_unavailable_current_page_disables_button_and_does_nothing(focus_state, 
 
 def test_filter_and_catalog_deletion_readdition_update_button(focus_state):
     state = focus_state
-    page = state.root / '1.html'
-    page.write_text('page', encoding='utf-8')
+    page = state.root / "1.html"
+    page.write_text("page", encoding="utf-8")
     state.current = page
-    state.store = NS(patterns=['*.html'])
+    state.store = NS(patterns=["*.html"])
     state.sync_catalog_watches = Mock()
     state.closing = False
     state.rebuild = lambda files=None: Window.rebuild(state, files)
     state.rebuild()
     assert state.focus_page_button.enabled
 
-    state.store.patterns = ['*.txt']
+    state.store.patterns = ["*.txt"]
     state.rebuild()
     assert not state.focus_page_button.enabled
-    state.store.patterns = ['*.html']
+    state.store.patterns = ["*.html"]
     state.rebuild()
     assert state.focus_page_button.enabled
 
     page.unlink()
     Window.refresh_catalog(state)
     assert not state.focus_page_button.enabled
-    page.write_text('returned', encoding='utf-8')
+    page.write_text("returned", encoding="utf-8")
     Window.refresh_catalog(state)
     assert state.focus_page_button.enabled
     assert state.current == page
@@ -95,15 +97,18 @@ def test_filter_and_catalog_deletion_readdition_update_button(focus_state):
 
 def test_switch_course_clears_old_current_and_disables_focus(focus_state):
     state = focus_state
-    state.current = state.root / 'old.html'
+    state.current = state.root / "old.html"
     Window.rebuild(state, [state.current])
     assert state.focus_page_button.enabled
-    new_root = state.root / 'new'
+    new_root = state.root / "new"
     new_root.mkdir()
     state.persist = Mock()
+    state.notes_search = Mock()
     state.catalog_timer = Mock()
     state.catalog_fallback = Mock()
-    state.store = NS(patterns=['*.html'], activate_course=Mock(), course=lambda root: {'last': ''})
+    state.store = NS(
+        patterns=["*.html"], activate_course=Mock(), course=lambda root: {"last": ""}
+    )
     state.sync_catalog_watches = Mock()
     state.rebuild = lambda: Window.rebuild(state)
     state.refresh_metadata = state.update_focus_button
@@ -119,17 +124,17 @@ def test_switch_course_clears_old_current_and_disables_focus(focus_state):
 
 def test_metadata_refresh_updates_button_after_local_page_changes(focus_state):
     state = focus_state
-    page = state.root / '1.html'
+    page = state.root / "1.html"
     Window.rebuild(state, [page])
     state.favorites = Mock()
     state.refresh_notes = Mock()
     state.favorite_action = Mock()
-    state.store = NS(course=lambda root: {'favorites': []})
+    state.store = NS(course=lambda root: {"favorites": []})
     state.statusBar = Mock()
 
     state.current = page
     Window.refresh_metadata(state)
     assert state.focus_page_button.enabled
-    state.current = state.root / 'filtered.html'
+    state.current = state.root / "filtered.html"
     Window.refresh_metadata(state)
     assert not state.focus_page_button.enabled

@@ -1,0 +1,88 @@
+[tool.pytest.ini_options]
+# Dedicated disposable directory; pytest clears it before each run.
+addopts = "--basetemp=tests/temp"
+norecursedirs = ["temp", "manual_state", ".*", "build", "dist", "*.egg", "venv"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+indent-width = 4
+extend-exclude = ["_legacy", "docs"]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "C4",  # flake8-comprehensions
+    "C90",  # mccabe complexity
+    "B",  # flake8-bugbear
+]
+# Ruff format targets line-length but cannot wrap every string or docstring.
+ignore = ["E501"]
+# Allow available fixes for enabled rules; unsafe fixes remain disabled by default.
+fixable = ["ALL"]
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+[tool.ruff.lint.mccabe]
+# Report functions whose complexity exceeds the agreed threshold.
+max-complexity = 10
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "tests"]
+known-third-party = []
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["main.py", "src", "tests"]
+exclude = ["^_legacy/"]
+
+[[tool.mypy.overrides]]
+# Tests are standalone modules: tests/ has no __init__.py.
+# Add new test modules here to apply the same annotation policy.
+module = [
+    "test_about",
+    "test_active_course",
+    "test_badge_paint",
+    "test_catalog",
+    "test_catalog_refresh",
+    "test_course_notes",
+    "test_course_removal",
+    "test_course_rows",
+    "test_escape",
+    "test_focus_page",
+    "test_format_badges",
+    "test_format_groups",
+    "test_identity",
+    "test_navigation",
+    "test_note_controls",
+    "test_note_groups",
+    "test_note_presentation",
+    "test_note_time",
+    "test_notes_search",
+    "test_page_context_menu",
+    "test_remote_resources",
+    "test_scroll_restore",
+    "test_selection_note",
+    "test_storage",
+    "test_tree_search",
+    "test_tree_style",
+    "font_probe",
+    "font_regression_check",
+    "gui_preview",
+    "scroll_zoom_probe",
+    "window_font_probe",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+check_untyped_defs = true
