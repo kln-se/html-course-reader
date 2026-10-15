@@ -12,11 +12,12 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $pythonExe = Join-Path $projectRoot '.venv/Scripts/python.exe'
 $assets = Join-Path $projectRoot 'src/course_reader/assets'
+$hooksDir = Join-Path $projectRoot 'scripts/hooks'
 $outputDir = Join-Path $projectRoot 'dist/HtmlCourseReader'
 
 Push-Location -LiteralPath $projectRoot
 try {
-    foreach ($required in @($pythonExe, "$assets/app.ico", 'main.py', 'LICENSE', 'THIRD_PARTY_NOTICES.txt', 'licenses')) {
+    foreach ($required in @($pythonExe, "$assets/app.ico", "$hooksDir/hook-PySide6.QtGui.py", 'main.py', 'LICENSE')) {
         if (-not (Test-Path -LiteralPath $required)) {
             throw "Required path is missing: $required"
         }
@@ -29,6 +30,13 @@ try {
         '-B', '-m', 'PyInstaller', '--onedir', '--windowed',
         '--name', 'HtmlCourseReader', '--distpath', 'dist',
         '--workpath', 'build', '--specpath', 'build',
+        '--additional-hooks-dir', $hooksDir,
+        # This application uses Widgets, not QML. Avoid collecting the entire
+        # QML plugin tree; native DLL dependencies are still resolved normally.
+        '--exclude-module', 'PySide6.QtQml',
+        '--exclude-module', 'PySide6.QtQuick',
+        '--exclude-module', 'PySide6.QtQuickWidgets',
+        '--exclude-module', 'PySide6.QtWebEngineQuick',
         '--icon', "$assets/app.ico",
         '--add-data', "${assets}:src/course_reader/assets", 'main.py'
     )
@@ -40,8 +48,19 @@ try {
         throw 'PyInstaller did not produce the expected executable.'
     }
 
-    Copy-Item -LiteralPath 'LICENSE', 'THIRD_PARTY_NOTICES.txt' -Destination $outputDir
-    Copy-Item -LiteralPath 'licenses' -Destination $outputDir -Recurse
+    # Detect accidental reintroduction of the unused QML distribution.
+    if (Test-Path -LiteralPath "$outputDir/_internal/PySide6/qml") {
+        throw 'Unexpected QML plugin tree in output. Review the build dependencies before distribution.'
+    }
+    $unexpectedQtDlls = @(
+        Get-ChildItem -LiteralPath "$outputDir/_internal" -Recurse -File |
+            Where-Object { $_.Name -match '^Qt6(Charts|DataVisualization|Graphs|GraphsWidgets|Quick3D.*|QuickTimeline.*|VirtualKeyboard)\.dll$' }
+    )
+    if ($unexpectedQtDlls.Count -gt 0) {
+        throw "Unexpected optional Qt modules in output: $($unexpectedQtDlls.Name -join ', '). Review dependencies before distribution."
+    }
+
+    Copy-Item -LiteralPath 'LICENSE' -Destination $outputDir
     Write-Host "Build complete: $outputDir/HtmlCourseReader.exe"
 } finally {
     Pop-Location
