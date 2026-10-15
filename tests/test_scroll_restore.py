@@ -7,6 +7,7 @@ from unittest.mock import Mock
 import pytest
 from PySide6.QtCore import QPointF, QUrl
 from PySide6.QtWebEngineCore import QWebEnginePage
+from PySide6.QtWidgets import QMessageBox
 
 from src.course_reader.storage import Store
 from src.course_reader.viewer import Page
@@ -14,8 +15,13 @@ from src.course_reader.window import Window
 
 
 @pytest.fixture
-def make_reader(tmp_path):
+def make_reader(tmp_path, monkeypatch):
     """Соединить реальные обработчики; заменить только Qt и обновление панелей."""
+
+    def unexpected_warning(parent, title, message):
+        pytest.fail(f"Неожиданное предупреждение: {title}: {message}")
+
+    monkeypatch.setattr(QMessageBox, "warning", unexpected_warning)
 
     def create(zoom=1.0):
         state = SimpleNamespace(
@@ -60,6 +66,21 @@ def make_reader(tmp_path):
         return state
 
     return create
+
+
+def test_persist_reports_save_error_without_retry(make_reader, monkeypatch):
+    """Given: отказ записи. When: сохранение. Then: одно предупреждение без повтора."""
+    reader = make_reader()
+    failure = PermissionError(13, "Доступ запрещён", "history.json")
+    save = Mock(side_effect=failure)
+    warning = Mock()
+    monkeypatch.setattr(reader.store, "save", save)
+    monkeypatch.setattr(QMessageBox, "warning", warning)
+
+    reader.persist()
+
+    save.assert_called_once_with()
+    warning.assert_called_once_with(reader, "Не удалось сохранить данные", str(failure))
 
 
 def finish_navigation(reader, success=True):
